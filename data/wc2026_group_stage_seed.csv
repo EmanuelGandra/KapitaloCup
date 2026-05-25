@@ -1,0 +1,73 @@
+match_id,stage,group_name,match_no,kickoff_at,venue,home_team,away_team,is_open
+GA-01,Grupos,A,1,,,Mexico,South Africa,True
+GA-02,Grupos,A,2,,,Mexico,Korea Republic,True
+GA-03,Grupos,A,3,,,Mexico,Czechia,True
+GA-04,Grupos,A,4,,,South Africa,Korea Republic,True
+GA-05,Grupos,A,5,,,South Africa,Czechia,True
+GA-06,Grupos,A,6,,,Korea Republic,Czechia,True
+GB-01,Grupos,B,7,,,Canada,Bosnia and Herzegovina,True
+GB-02,Grupos,B,8,,,Canada,Qatar,True
+GB-03,Grupos,B,9,,,Canada,Switzerland,True
+GB-04,Grupos,B,10,,,Bosnia and Herzegovina,Qatar,True
+GB-05,Grupos,B,11,,,Bosnia and Herzegovina,Switzerland,True
+GB-06,Grupos,B,12,,,Qatar,Switzerland,True
+GC-01,Grupos,C,13,,,Brazil,Morocco,True
+GC-02,Grupos,C,14,,,Brazil,Haiti,True
+GC-03,Grupos,C,15,,,Brazil,Scotland,True
+GC-04,Grupos,C,16,,,Morocco,Haiti,True
+GC-05,Grupos,C,17,,,Morocco,Scotland,True
+GC-06,Grupos,C,18,,,Haiti,Scotland,True
+GD-01,Grupos,D,19,,,United States,Paraguay,True
+GD-02,Grupos,D,20,,,United States,Australia,True
+GD-03,Grupos,D,21,,,United States,Turkiye,True
+GD-04,Grupos,D,22,,,Paraguay,Australia,True
+GD-05,Grupos,D,23,,,Paraguay,Turkiye,True
+GD-06,Grupos,D,24,,,Australia,Turkiye,True
+GE-01,Grupos,E,25,,,Germany,Curacao,True
+GE-02,Grupos,E,26,,,Germany,Ivory Coast,True
+GE-03,Grupos,E,27,,,Germany,Ecuador,True
+GE-04,Grupos,E,28,,,Curacao,Ivory Coast,True
+GE-05,Grupos,E,29,,,Curacao,Ecuador,True
+GE-06,Grupos,E,30,,,Ivory Coast,Ecuador,True
+GF-01,Grupos,F,31,,,Netherlands,Japan,True
+GF-02,Grupos,F,32,,,Netherlands,Sweden,True
+GF-03,Grupos,F,33,,,Netherlands,Tunisia,True
+GF-04,Grupos,F,34,,,Japan,Sweden,True
+GF-05,Grupos,F,35,,,Japan,Tunisia,True
+GF-06,Grupos,F,36,,,Sweden,Tunisia,True
+GG-01,Grupos,G,37,,,Belgium,Egypt,True
+GG-02,Grupos,G,38,,,Belgium,Iran,True
+GG-03,Grupos,G,39,,,Belgium,New Zealand,True
+GG-04,Grupos,G,40,,,Egypt,Iran,True
+GG-05,Grupos,G,41,,,Egypt,New Zealand,True
+GG-06,Grupos,G,42,,,Iran,New Zealand,True
+GH-01,Grupos,H,43,,,Spain,Cape Verde,True
+GH-02,Grupos,H,44,,,Spain,Saudi Arabia,True
+GH-03,Grupos,H,45,,,Spain,Uruguay,True
+GH-04,Grupos,H,46,,,Cape Verde,Saudi Arabia,True
+GH-05,Grupos,H,47,,,Cape Verde,Uruguay,True
+GH-06,Grupos,H,48,,,Saudi Arabia,Uruguay,True
+GI-01,Grupos,I,49,,,France,Senegal,True
+GI-02,Grupos,I,50,,,France,Iraq,True
+GI-03,Grupos,I,51,,,France,Norway,True
+GI-04,Grupos,I,52,,,Senegal,Iraq,True
+GI-05,Grupos,I,53,,,Senegal,Norway,True
+GI-06,Grupos,I,54,,,Iraq,Norway,True
+GJ-01,Grupos,J,55,,,Argentina,Algeria,True
+GJ-02,Grupos,J,56,,,Argentina,Austria,True
+GJ-03,Grupos,J,57,,,Argentina,Jordan,True
+GJ-04,Grupos,J,58,,,Algeria,Austria,True
+GJ-05,Grupos,J,59,,,Algeria,Jordan,True
+GJ-06,Grupos,J,60,,,Austria,Jordan,True
+GK-01,Grupos,K,61,,,Portugal,DR Congo,True
+GK-02,Grupos,K,62,,,Portugal,Uzbekistan,True
+GK-03,Grupos,K,63,,,Portugal,Colombia,True
+GK-04,Grupos,K,64,,,DR Congo,Uzbekistan,True
+GK-05,Grupos,K,65,,,DR Congo,Colombia,True
+GK-06,Grupos,K,66,,,Uzbekistan,Colombia,True
+GL-01,Grupos,L,67,,,England,Croatia,True
+GL-02,Grupos,L,68,,,England,Ghana,True
+GL-03,Grupos,L,69,,,England,Panama,True
+GL-04,Grupos,L,70,,,Croatia,Ghana,True
+GL-05,Grupos,L,71,,,Croatia,Panama,True
+GL-06,Grupos,L,72,,,Ghana,Panama,True
