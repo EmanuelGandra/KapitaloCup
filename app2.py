@@ -1,4 +1,9 @@
 from pathlib import Path
+
+import pandas as pd
+import streamlit as st
+import base64
+from pathlib import Path
 import base64
 
 import pandas as pd
@@ -511,28 +516,10 @@ def stage_points_for_match(stage: str) -> dict:
     if "grupo" in stage or "group" in stage or "primeira" in stage:
         return {"result": 5, "exact": 5, "qualified": 0}
 
-    # Dezesseis-avos / Round of 32:
-    # aparece como fase de jogo, com campo "Classificado" no palpite,
-    # mas NÃO aparece em "Classificados e extras".
-    if (
-        "dezesseis" in stage
-        or "16 avos" in stage
-        or "16avos" in stage
-        or "round of 32" in stage
-        or "r32" in stage
-        or "32" in stage
-    ):
+    if "dezesseis" in stage or "32" in stage:
         return {"result": 8, "exact": 8, "qualified": 8}
 
-    # Oitavas / Round of 16.
-    # Importante: fica depois de "16 avos" para não confundir as fases.
-    if (
-        "oitavas" in stage
-        or "8 avos" in stage
-        or "8avos" in stage
-        or "round of 16" in stage
-        or "r16" in stage
-    ):
+    if "oitavas" in stage or "16" in stage:
         return {"result": 10, "exact": 10, "qualified": 10}
 
     if "quartas" in stage or "quarter" in stage:
@@ -1600,14 +1587,6 @@ def render_rules_page():
                 "Placar exato": "+5",
                 "Classificado": "Não se aplica por jogo",
                 "Total possível": 880,
-            },
-            {
-                "Fase": "Dezesseis-avos de Final",
-                "Jogos": 16,
-                "Resultado": 8,
-                "Placar exato": "+8",
-                "Classificado": 8,
-                "Total possível": 384,
             },
             {
                 "Fase": "Oitavas de Final",
