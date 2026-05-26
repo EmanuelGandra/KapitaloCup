@@ -556,6 +556,7 @@ def get_lock_label_from_key(lock_key: str) -> str:
         "final": "Final",
         "extras": "Extras",
     }
+    
     return labels.get(lock_key, lock_key)
 
 
@@ -1491,10 +1492,17 @@ def render_home_page():
         st.success(
             f"Próximo fechamento: {get_lock_label_from_key(next_key)} em {next_at.strftime('%d/%m/%Y %H:%M')}."
         )
-    lock_schedule_view = lock_schedule.drop('Chave no secrets.toml')
-    with st.expander("Ver prazos por fase", expanded=True):
-        st.dataframe(lock_schedule_view,
-                     use_container_width=True, hide_index=True)
+        
+    with st.expander("Ver prazos por fase"):
+        lock_df = build_lock_schedule_df()
+
+        lock_view = lock_df.drop(columns=["Chave", "Chave no secrets.toml"], errors="ignore")
+
+        st.dataframe(
+            lock_view,
+            use_container_width=True,
+            hide_index=True,
+        )
 
     st.download_button(
         label="Baixar minhas previsões em Excel",
