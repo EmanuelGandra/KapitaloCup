@@ -2725,11 +2725,29 @@ def main():
             render_rules_page()
 
         with tab_ranking:
-            st.info(
-                "O ranking consulta o banco e pode levar alguns segundos. "
-                "Clique no botão abaixo apenas quando quiser carregar a classificação."
-            )
-            if st.button("Carregar ranking", key="load_public_ranking", use_container_width=True):
+            if "public_ranking_loaded" not in st.session_state:
+                st.session_state["public_ranking_loaded"] = False
+
+            if not st.session_state["public_ranking_loaded"]:
+                st.info(
+                    "O ranking consulta o banco e pode levar alguns segundos. "
+                    "Clique no botão abaixo apenas quando quiser carregar a classificação."
+                )
+
+                if st.button("Carregar ranking", key="load_public_ranking", use_container_width=True):
+                    st.session_state["public_ranking_loaded"] = True
+                    st.rerun()
+            else:
+                col_load, col_clear = st.columns([3, 1])
+
+                with col_load:
+                    st.success("Ranking carregado. Você pode trocar entre tabela e detalhe sem perder os dados.")
+
+                with col_clear:
+                    if st.button("Ocultar ranking", key="hide_public_ranking", use_container_width=True):
+                        st.session_state["public_ranking_loaded"] = False
+                        st.rerun()
+
                 render_ranking()
 
         return
