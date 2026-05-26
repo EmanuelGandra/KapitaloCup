@@ -1546,9 +1546,15 @@ def render_home_page():
 
 
 def render_ranking():
-    if st_autorefresh is not None:
-        st_autorefresh(interval=60_000, key="ranking_autorefresh")
+    """
+    Ranking com navegação estável.
 
+    Antes esta página usava st.tabs + st_autorefresh. Quando o usuário trocava o
+    jogador no selectbox, o Streamlit fazia rerun e podia voltar para a primeira
+    aba ou interromper a renderização visual dos detalhes. Agora usamos um radio
+    persistente para alternar entre tabela e detalhe, e o ranking só atualiza por
+    botão ou pelo cache normal do app.
+    """
     data = load_ranking_inputs()
 
     ranking = calculate_ranking_cached(
@@ -1577,9 +1583,25 @@ def render_ranking():
     with col3:
         metric_box("Maior pontuação", str(int(ranking["Pontuação"].max())))
 
-    tab_table, tab_detail = st.tabs(["Tabela geral", "Detalhe dos pontos"])
+    st.markdown("### Ranking")
 
-    with tab_table:
+    top_left, top_right = st.columns([3, 1])
+
+    with top_left:
+        ranking_view = st.radio(
+            "Visualização",
+            ["Tabela geral", "Detalhe dos pontos"],
+            horizontal=True,
+            key="ranking_view_mode",
+        )
+
+    with top_right:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("Atualizar ranking", key="refresh_ranking_button", use_container_width=True):
+            clear_data_cache()
+            st.rerun()
+
+    if ranking_view == "Tabela geral":
         st.markdown("### Tabela de classificação")
 
         display_ranking = ranking.drop(columns=["user_id"], errors="ignore")
@@ -1590,21 +1612,35 @@ def render_ranking():
             hide_index=True,
             height=420,
         )
+        return
 
-    with tab_detail:
-        st.markdown("### Detalhe dos pontos por jogador")
+    st.markdown("### Detalhe dos pontos por jogador")
 
-        user_options = ranking["Usuário"].tolist()
+    user_options = ranking["Usuário"].tolist()
 
-        selected_username = st.selectbox(
-            "Selecione um jogador",
-            user_options,
-            key="ranking_detail_user",
-        )
+    # Mantém a escolha do usuário estável entre reruns.
+    if "ranking_detail_user" not in st.session_state:
+        st.session_state["ranking_detail_user"] = user_options[0]
 
-        selected_row = ranking[ranking["Usuário"] == selected_username].iloc[0]
-        selected_user_id = selected_row["user_id"]
+    if st.session_state["ranking_detail_user"] not in user_options:
+        st.session_state["ranking_detail_user"] = user_options[0]
 
+    selected_username = st.selectbox(
+        "Selecione um jogador",
+        user_options,
+        key="ranking_detail_user",
+    )
+
+    selected_rows = ranking[ranking["Usuário"] == selected_username]
+
+    if selected_rows.empty:
+        st.warning("Não encontrei esse jogador no ranking. Atualize o ranking e tente novamente.")
+        return
+
+    selected_row = selected_rows.iloc[0]
+    selected_user_id = selected_row["user_id"]
+
+    with st.spinner(f"Carregando detalhes de {selected_username}..."):
         breakdown = build_score_breakdown_for_user(
             user_id=selected_user_id,
             matches=data["matches"],
@@ -1616,53 +1652,53 @@ def render_ranking():
             bonus_actuals=data["bonus_actuals"],
         )
 
-        total_points = int(breakdown["Pontos"].sum()
-                           ) if not breakdown.empty else 0
+    total_points = int(breakdown["Pontos"].sum()) if not breakdown.empty else 0
 
-        col_a, col_b, col_c = st.columns(3)
+    col_a, col_b, col_c = st.columns(3)
 
-        with col_a:
-            metric_box("Jogador", selected_username)
+    with col_a:
+        metric_box("Jogador", selected_username)
 
-        with col_b:
-            metric_box("Pontuação total", str(total_points))
+    with col_b:
+        metric_box("Pontuação total", str(total_points))
 
-        with col_c:
-            metric_box("Itens pontuados", str(len(breakdown)))
+    with col_c:
+        metric_box("Itens pontuados", str(len(breakdown)))
 
-        if breakdown.empty:
-            st.info(
-                "Esse jogador ainda não pontuou ou ainda não há resultados oficiais cadastrados.")
-            return
+    if breakdown.empty:
+        st.info("Esse jogador ainda não pontuou ou ainda não há resultados oficiais cadastrados.")
+        return
 
-        summary = (
-            breakdown
-            .groupby("Categoria", as_index=False)["Pontos"]
-            .sum()
-            .sort_values("Pontos", ascending=False)
-        )
+    summary = (
+        breakdown
+        .groupby("Categoria", as_index=False)["Pontos"]
+        .sum()
+        .sort_values("Pontos", ascending=False)
+    )
 
-        st.markdown("#### Resumo por categoria")
-        st.dataframe(summary, use_container_width=True, hide_index=True)
+    st.markdown("#### Resumo por categoria")
+    st.dataframe(summary, use_container_width=True, hide_index=True)
 
-        category_options = [
-            "Todas"] + sorted(breakdown["Categoria"].dropna().unique().tolist())
+    category_options = ["Todas"] + sorted(breakdown["Categoria"].dropna().unique().tolist())
 
-        selected_category = st.selectbox(
-            "Filtrar categoria",
-            category_options,
-            key="ranking_detail_category",
-        )
+    selected_category = st.selectbox(
+        "Filtrar categoria",
+        category_options,
+        key=f"ranking_detail_category_{selected_user_id}",
+    )
 
-        detail_view = breakdown.copy()
+    detail_view = breakdown.copy()
 
-        if selected_category != "Todas":
-            detail_view = detail_view[detail_view["Categoria"]
-                                      == selected_category].copy()
+    if selected_category != "Todas":
+        detail_view = detail_view[detail_view["Categoria"] == selected_category].copy()
 
-        st.markdown("#### Pontos conquistados")
-        st.dataframe(detail_view, use_container_width=True,
-                     hide_index=True, height=420)
+    st.markdown("#### Pontos conquistados")
+    st.dataframe(
+        detail_view,
+        use_container_width=True,
+        hide_index=True,
+        height=420,
+    )
 
 
 # ============================================================
