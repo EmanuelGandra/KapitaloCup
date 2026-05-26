@@ -308,7 +308,7 @@ st.markdown(
 # CACHE / DADOS
 # ============================================================
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=45, show_spinner=False)
 def cached_table(table_name: str, order_by: str | None = None) -> pd.DataFrame:
     try:
         return fetch_df(table_name, order_by=order_by)
@@ -1230,7 +1230,7 @@ def build_score_breakdown_for_user(
     return df.sort_values(["Categoria", "Fase", "Item"]).reset_index(drop=True)
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=45, show_spinner=False)
 def calculate_ranking_cached(
     profiles: pd.DataFrame,
     matches: pd.DataFrame,
@@ -2597,32 +2597,13 @@ def main():
             "O bolão da Copa do Mundo 2026. Faça login para registrar seus palpites.",
         )
 
-        st.markdown(
-            """
-            <div class="section-card">
-                <h3 style="margin-bottom:0.25rem;">Bem-vindo à Kapitalo Cup</h3>
-                <p style="color:#6b7280;margin-bottom:0;">
-                    Faça login ou crie seu usuário no menu lateral para acessar seus palpites,
-                    pendências, ranking e exportações. Para deixar o carregamento inicial mais rápido,
-                    o ranking só é carregado quando você clicar no botão abaixo.
-                </p>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        tab_ranking, tab_regras = st.tabs(["Ranking", "Regras"])
 
-        tab_regras, tab_ranking = st.tabs(["Regras", "Ranking"])
+        with tab_ranking:
+            render_ranking()
 
         with tab_regras:
             render_rules_page()
-
-        with tab_ranking:
-            st.info(
-                "O ranking consulta o banco e pode levar alguns segundos. "
-                "Clique no botão abaixo apenas quando quiser carregar a classificação."
-            )
-            if st.button("Carregar ranking", key="load_public_ranking", use_container_width=True):
-                render_ranking()
 
         return
 
@@ -2631,7 +2612,7 @@ def main():
     if page == "Início":
         hero(
             "Painel da Kapitalo Cup",
-            "Veja o que falta preencher, acompanhe os prazos e exporte suas previsões.",
+            "Veja o que falta preencher, acompanhe o prazo e exporte suas previsões.",
         )
         render_home_page()
 
@@ -2666,6 +2647,3 @@ def main():
         )
         render_admin_page()
 
-
-if __name__ == "__main__":
-    main()
