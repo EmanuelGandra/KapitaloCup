@@ -2347,7 +2347,6 @@ def render_match_predictions_page():
             "away_team": match.get("away_team", ""),
             "match_no": match.get("match_no", ""),
             "label": (
-                f"Jogo {match.get('match_no', '')} — "
                 f"{format_kickoff(match.get('kickoff_at'))} — "
                 f"{match.get('home_team', '')} x {match.get('away_team', '')}"
             ),
@@ -2433,7 +2432,7 @@ def render_match_predictions_page():
             f"""
             <div class="match-title">{home_team} x {away_team}</div>
             <div class="match-meta">
-                Jogo {match_no} • {kickoff_text} {f"• Grupo {group_name}" if group_name else ""} &nbsp; {saved_badge} &nbsp; {lock_badge}
+                {kickoff_text} {f"• Grupo {group_name}" if group_name else ""} &nbsp; {saved_badge} &nbsp; {lock_badge}
             </div>
             """,
             unsafe_allow_html=True,
@@ -2554,36 +2553,6 @@ def render_match_predictions_page():
 
         st.markdown("</div>", unsafe_allow_html=True)
 
-    if selected_group and is_group_stage(selected_stage) and not filtered.empty:
-        st.divider()
-        st.markdown("### Salvar grupo inteiro")
-        st.caption(
-            "Use este botão para salvar todos os jogos do grupo selecionado de uma vez. "
-            "Jogos ainda vazios serão listados para você preencher antes de salvar."
-        )
-
-        if st.button(
-            f"Salvar todos os palpites do Grupo {selected_group}",
-            key=f"save_all_group_{selected_stage}_{selected_group}",
-            use_container_width=True,
-            disabled=selected_stage_locked,
-        ):
-            if is_stage_locked(selected_stage):
-                st.error(
-                    f"Não é possível alterar este grupo. O prazo de {selected_stage} encerrou em {stage_lock_text(selected_stage)}."
-                )
-                st.stop()
-
-            invalid_rows, payload_rows = build_prediction_payloads_from_state(
-                visible_prediction_rows,
-                user_id,
-            )
-            save_prediction_payloads_or_show_errors(
-                supabase,
-                payload_rows,
-                invalid_rows,
-                f"Todos os palpites do Grupo {selected_group} foram salvos.",
-            )
 
 
 def render_predictions_page():
@@ -3082,7 +3051,7 @@ def render_admin_page():
             st.markdown(
                 f"""
                 <div class="match-title">{home_team} x {away_team}</div>
-                <div class="match-meta">Jogo {match_no} • {kickoff_text} &nbsp; {result_badge}</div>
+                <div class="match-meta">{kickoff_text} &nbsp; {result_badge}</div>
                 """,
                 unsafe_allow_html=True,
             )
