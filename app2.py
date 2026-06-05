@@ -320,8 +320,7 @@ def cached_table(table_name: str, order_by: str | None = None) -> pd.DataFrame:
 
 def clear_data_cache():
     cached_table.clear()
-    if "calculate_ranking_cached" in globals():
-        calculate_ranking_cached.clear()
+    calculate_ranking_cached.clear()
 
 
 def load_table(table_name: str, order_by: str | None = None) -> pd.DataFrame:
@@ -1769,57 +1768,6 @@ def build_score_breakdown_for_user(
     df = pd.DataFrame(rows)
     return df.sort_values(["Categoria", "Fase", "Item"]).reset_index(drop=True)
 
-@st.cache_data(ttl=300, show_spinner=False)
-def calculate_ranking_cached(
-    profiles: pd.DataFrame,
-    matches: pd.DataFrame,
-    predictions: pd.DataFrame,
-    actual_results: pd.DataFrame,
-    phase_predictions: pd.DataFrame,
-    phase_actuals: pd.DataFrame,
-    bonus_predictions: pd.DataFrame,
-    bonus_actuals: pd.DataFrame,
-) -> pd.DataFrame:
-    if profiles.empty:
-        return pd.DataFrame(columns=["Posição", "Usuário", "Pontuação"])
-
-    ranking_rows = []
-
-    for _, user in profiles.iterrows():
-        user_id = user.get("id")
-        username = user.get("username", "")
-
-        breakdown = build_score_breakdown_for_user(
-            user_id=user_id,
-            matches=matches,
-            predictions=predictions,
-            actual_results=actual_results,
-            phase_predictions=phase_predictions,
-            phase_actuals=phase_actuals,
-            bonus_predictions=bonus_predictions,
-            bonus_actuals=bonus_actuals,
-        )
-
-        score = int(breakdown["Pontos"].sum()) if not breakdown.empty else 0
-
-        ranking_rows.append(
-            {
-                "Usuário": username,
-                "user_id": user_id,
-                "Pontuação": score,
-            }
-        )
-
-    ranking = pd.DataFrame(ranking_rows)
-    if ranking.empty:
-        return pd.DataFrame(columns=["Posição", "Usuário", "Pontuação"])
-
-    ranking = ranking.sort_values("Pontuação", ascending=False).reset_index(drop=True)
-    ranking.insert(0, "Posição", ranking.index + 1)
-
-    return ranking
-
-
 def load_ranking_inputs():
     profiles = load_table("profiles")
     matches = load_table("matches", order_by="match_no")
@@ -2920,7 +2868,7 @@ def render_rules_page():
             },
             {
                 "Fase": "Extras",
-                "Jogos": 0,
+                "Jogos": "-",
                 "Resultado": "-",
                 "Placar exato": "-",
                 "Classificado no jogo": "-",
