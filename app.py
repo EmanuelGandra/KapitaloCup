@@ -684,6 +684,47 @@ def is_knockout_stage(stage: str) -> bool:
     return not is_group_stage(stage)
 
 
+def format_kickoff(value) -> str:
+    """Formata kickoff_at como horário do Brasil/São Paulo.
+
+    A coluna kickoff_at está sendo tratada como timestamp local do Brasil,
+    sem conversão adicional de timezone.
+    """
+    if value is None or pd.isna(value) or str(value).strip() == "":
+        return "Horário a definir"
+
+    dt = pd.to_datetime(value, errors="coerce")
+
+    if pd.isna(dt):
+        return "Horário a definir"
+
+    return dt.strftime("%d/%m/%Y %H:%M")
+
+
+def sort_matches_for_display(df: pd.DataFrame) -> pd.DataFrame:
+    """Ordena jogos por horário de realização e usa match_no como desempate."""
+    if df is None or df.empty:
+        return df
+
+    out = df.copy()
+
+    if "kickoff_at" in out.columns:
+        out["kickoff_sort"] = pd.to_datetime(out["kickoff_at"], errors="coerce")
+    else:
+        out["kickoff_sort"] = pd.NaT
+
+    sort_cols = ["kickoff_sort"]
+    ascending = [True]
+
+    if "match_no" in out.columns:
+        sort_cols.append("match_no")
+        ascending.append(True)
+
+    out = out.sort_values(sort_cols, ascending=ascending, na_position="last")
+
+    return out.drop(columns=["kickoff_sort"], errors="ignore")
+
+
 def create_excel_bytes(sheets: dict[str, pd.DataFrame]) -> bytes:
     output = io.BytesIO()
 
@@ -1867,7 +1908,6 @@ def render_logged_sidebar():
             "Início",
             "Ranking",
             "Meus palpites",
-            "Classificados e extras",
             "Regras",
         ]
 
@@ -2106,7 +2146,7 @@ def render_ranking():
 # ============================================================
 
 
-def render_predictions_page():
+def render_match_predictions_page():
     if not st.session_state.get("is_logged_in", False):
         st.warning("Você precisa fazer login para registrar palpites.")
         return
@@ -2294,7 +2334,7 @@ def render_predictions_page():
                     disabled=match_locked,
                 )
         else:
-            st.caption("Fase de grupos: aqui você preenche apenas o placar. Classificados são preenchidos na aba Classificados e extras.")
+            st.caption("Fase de grupos: aqui você preenche apenas o placar. Classificados e extras ficam na aba correspondente dentro de Meus palpites.")
 
         save_col1, save_col2 = st.columns([1, 4])
 
@@ -2337,6 +2377,38 @@ def render_predictions_page():
                 status_pill("Pendente")
 
         st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_predictions_page():
+    """Página única de palpites.
+
+    Junta os placares dos jogos com a antiga tela de Classificados e extras,
+    para o usuário não precisar navegar em duas áreas diferentes.
+    """
+    if not st.session_state.get("is_logged_in", False):
+        st.warning("Você precisa fazer login para registrar palpites.")
+        return
+
+    tab_games, tab_classificados, tab_extras_info = st.tabs(
+        ["Jogos", "Classificados e extras", "Como funciona"]
+    )
+
+    with tab_games:
+        render_match_predictions_page()
+
+    with tab_classificados:
+        render_phase_predictions_page()
+
+    with tab_extras_info:
+        st.markdown("### Classificados e extras dentro de Meus palpites")
+        st.info(
+            "A antiga tela separada foi incorporada aqui. Use a aba 'Jogos' para os placares "
+            "e a aba 'Classificados e extras' para campeão, artilheiro e seleções classificadas por fase."
+        )
+        st.caption(
+            "Na próxima etapa, os classificados do mata-mata podem passar a ser derivados automaticamente "
+            "dos placares salvos em cada jogo."
+        )
 
 
 # ============================================================
@@ -3130,12 +3202,6 @@ def main():
         )
         render_predictions_page()
 
-    elif page == "Classificados e extras":
-        hero(
-            "Classificados e extras",
-            "Escolha os classificados por fase, campeão e artilheiro.",
-        )
-        render_phase_predictions_page()
 
     elif page == "Regras":
         render_rules_page()
