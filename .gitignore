@@ -1,0 +1,7 @@
+
+# Local secrets
+.streamlit/secrets.toml
+secrets_google_chat_example.toml
+*.token.json
+chat_oauth_tokens.json
+client_secret.json

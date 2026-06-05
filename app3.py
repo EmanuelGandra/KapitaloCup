@@ -1,9 +1,7 @@
 from pathlib import Path
 import base64
 import io
-import json
 import re
-import tempfile
 from datetime import datetime
 
 import pandas as pd
@@ -366,12 +364,11 @@ def get_match_result_type(home_goals: int, away_goals: int) -> str:
     return "draw"
 
 
-
 def stage_points_for_match(stage: str) -> dict:
     stage = norm_text(stage)
 
     if "grupo" in stage or "group" in stage or "primeira" in stage:
-        return {"result": 5, "exact": 5, "qualified": 0}
+        return {"result": 7, "exact": 7, "qualified": 0}
 
     if (
         "dezesseis" in stage
@@ -381,7 +378,7 @@ def stage_points_for_match(stage: str) -> dict:
         or "r32" in stage
         or "32" in stage
     ):
-        return {"result": 8, "exact": 8, "qualified": 8}
+        return {"result": 10, "exact": 10, "qualified": 10}
 
     if (
         "oitavas" in stage
@@ -390,41 +387,56 @@ def stage_points_for_match(stage: str) -> dict:
         or "round of 16" in stage
         or "r16" in stage
     ):
-        return {"result": 10, "exact": 10, "qualified": 10}
+        return {"result": 12, "exact": 12, "qualified": 12}
 
     if "quartas" in stage or "quarter" in stage:
-        return {"result": 13, "exact": 13, "qualified": 13}
+        return {"result": 15, "exact": 15, "qualified": 15}
 
     if "semi" in stage:
-        return {"result": 16, "exact": 16, "qualified": 16}
-
-    if "3" in stage or "terceiro" in stage or "third" in stage:
-        return {"result": 10, "exact": 10, "qualified": 10}
-
-    if "final" in stage:
         return {"result": 20, "exact": 20, "qualified": 20}
 
-    return {"result": 0, "exact": 0, "qualified": 0}
+    if "3" in stage or "terceiro" in stage or "third" in stage:
+        return {"result": 15, "exact": 15, "qualified": 15}
 
+    if "final" in stage:
+        return {"result": 25, "exact": 25, "qualified": 25}
+
+    return {"result": 0, "exact": 0, "qualified": 0}
 
 
 def points_for_phase_prediction(phase: str) -> int:
     phase = norm_text(phase)
 
-    if "oitavas" in phase or "16" in phase:
+    if (
+        "dezesseis" in phase
+        or "16 avos" in phase
+        or "16avos" in phase
+        or "round of 32" in phase
+        or "r32" in phase
+        or "32" in phase
+    ):
         return 10
 
+    if (
+        "oitavas" in phase
+        or "8 avos" in phase
+        or "8avos" in phase
+        or "round of 16" in phase
+        or "r16" in phase
+    ):
+        return 12
+
     if "quartas" in phase:
-        return 13
+        return 15
 
     if "semis" in phase or "semi" in phase:
-        return 16
-
-    if "final" in phase:
         return 20
 
     if "terceiro" in phase or "3" in phase:
-        return 10
+        return 15
+
+    if "final" in phase:
+        return 25
 
     return 0
 
@@ -433,8 +445,10 @@ def get_all_teams(matches: pd.DataFrame) -> list[str]:
     if matches.empty:
         return []
 
-    home = matches["home_team"].dropna().tolist() if "home_team" in matches.columns else []
-    away = matches["away_team"].dropna().tolist() if "away_team" in matches.columns else []
+    home = matches["home_team"].dropna().tolist(
+    ) if "home_team" in matches.columns else []
+    away = matches["away_team"].dropna().tolist(
+    ) if "away_team" in matches.columns else []
 
     return sorted(set(home).union(set(away)))
 
@@ -487,7 +501,6 @@ def metric_box(label: str, value: str):
         """,
         unsafe_allow_html=True,
     )
-
 
 
 def status_pill(text: str, kind: str = ""):
@@ -570,7 +583,8 @@ def get_stage_lock_at(stage_or_phase: str) -> pd.Timestamp:
     """
     lock_key = get_stage_lock_key(stage_or_phase)
     secret_key = STAGE_LOCK_SECRET_KEYS.get(lock_key)
-    default_value = DEFAULT_STAGE_LOCKS.get(lock_key, DEFAULT_PREDICTION_LOCK_AT)
+    default_value = DEFAULT_STAGE_LOCKS.get(
+        lock_key, DEFAULT_PREDICTION_LOCK_AT)
 
     raw_value = default_value
 
@@ -655,11 +669,13 @@ def build_lock_schedule_df() -> pd.DataFrame:
 
 
 def render_stage_lock_message(stage_or_phase: str, label: str | None = None):
-    label = label or get_lock_label_from_key(get_stage_lock_key(stage_or_phase))
+    label = label or get_lock_label_from_key(
+        get_stage_lock_key(stage_or_phase))
     lock_at = stage_lock_text(stage_or_phase)
 
     if is_stage_locked(stage_or_phase):
-        st.warning(f"{label}: prazo encerrado em {lock_at}. Você ainda pode consultar e exportar previsões.")
+        st.warning(
+            f"{label}: prazo encerrado em {lock_at}. Você ainda pode consultar e exportar previsões.")
     else:
         st.success(f"{label}: aberto para cadastro/alteração até {lock_at}.")
 
@@ -682,6 +698,50 @@ def is_group_stage(stage: str) -> bool:
 
 def is_knockout_stage(stage: str) -> bool:
     return not is_group_stage(stage)
+
+
+def format_kickoff(value) -> str:
+    """Formata o horário salvo no Supabase em horário do Brasil/São Paulo.
+
+    O campo kickoff_at está sendo salvo como timestamp local do Brasil, sem
+    conversão de timezone. Por isso, aqui apenas formatamos o valor.
+    """
+    if value is None or pd.isna(value) or str(value).strip() == "":
+        return "Horário a definir"
+
+    dt = pd.to_datetime(value, errors="coerce")
+
+    if pd.isna(dt):
+        return "Horário a definir"
+
+    return dt.strftime("%d/%m/%Y %H:%M")
+
+
+def sort_matches_for_display(df: pd.DataFrame) -> pd.DataFrame:
+    """Ordena jogos por horário de realização e usa match_no como desempate.
+
+    Jogos sem kickoff_at ficam no final.
+    """
+    if df.empty:
+        return df
+
+    out = df.copy()
+
+    if "kickoff_at" in out.columns:
+        out["kickoff_sort"] = pd.to_datetime(out["kickoff_at"], errors="coerce")
+    else:
+        out["kickoff_sort"] = pd.NaT
+
+    sort_cols = ["kickoff_sort"]
+    ascending = [True]
+
+    if "match_no" in out.columns:
+        sort_cols.append("match_no")
+        ascending.append(True)
+
+    out = out.sort_values(sort_cols, ascending=ascending, na_position="last")
+
+    return out.drop(columns=["kickoff_sort"], errors="ignore")
 
 
 def create_excel_bytes(sheets: dict[str, pd.DataFrame]) -> bytes:
@@ -709,12 +769,14 @@ def create_excel_bytes(sheets: dict[str, pd.DataFrame]) -> bytes:
 
 def build_user_prediction_export(user_id: str) -> bytes:
     matches = load_table("matches", order_by="match_no")
+    matches = sort_matches_for_display(matches)
     predictions = load_table("predictions")
     phase_predictions = load_table("phase_predictions")
     bonus_predictions = load_table("bonus_predictions")
 
     if not predictions.empty and "user_id" in predictions.columns:
-        user_predictions = predictions[predictions["user_id"] == user_id].copy()
+        user_predictions = predictions[predictions["user_id"] == user_id].copy(
+        )
     else:
         user_predictions = pd.DataFrame()
 
@@ -730,6 +792,7 @@ def build_user_prediction_export(user_id: str) -> bytes:
             on="match_id",
             how="left",
         )
+        jogos = sort_matches_for_display(jogos)
 
         ordered_cols = [
             col
@@ -767,12 +830,14 @@ def build_user_prediction_export(user_id: str) -> bytes:
         )
 
     if not phase_predictions.empty and "user_id" in phase_predictions.columns:
-        classificados = phase_predictions[phase_predictions["user_id"] == user_id].copy()
+        classificados = phase_predictions[phase_predictions["user_id"] == user_id].copy(
+        )
     else:
         classificados = pd.DataFrame(columns=["phase", "team"])
 
     if not bonus_predictions.empty and "user_id" in bonus_predictions.columns:
-        extras = bonus_predictions[bonus_predictions["user_id"] == user_id].copy()
+        extras = bonus_predictions[bonus_predictions["user_id"] == user_id].copy(
+        )
     else:
         extras = pd.DataFrame(columns=["champion", "top_scorer"])
 
@@ -792,6 +857,7 @@ def build_user_prediction_export(user_id: str) -> bytes:
 def build_all_users_predictions_export() -> bytes:
     profiles = load_table("profiles")
     matches = load_table("matches", order_by="match_no")
+    matches = sort_matches_for_display(matches)
     predictions = load_table("predictions")
     phase_predictions = load_table("phase_predictions")
     bonus_predictions = load_table("bonus_predictions")
@@ -813,10 +879,11 @@ def build_all_users_predictions_export() -> bytes:
             if not user_pred.empty and not matches.empty:
                 match_cols = [
                     col
-                    for col in ["match_id", "match_no", "stage", "group_name", "home_team", "away_team"]
+                    for col in ["match_id", "match_no", "stage", "group_name", "home_team", "away_team", "kickoff_at"]
                     if col in matches.columns
                 ]
-                user_pred = user_pred.merge(matches[match_cols], on="match_id", how="left")
+                user_pred = user_pred.merge(
+                    matches[match_cols], on="match_id", how="left")
 
                 for _, row in user_pred.iterrows():
                     rows.append(
@@ -825,6 +892,7 @@ def build_all_users_predictions_export() -> bytes:
                             "Fase": row.get("stage", ""),
                             "Grupo": row.get("group_name", ""),
                             "Jogo": f"{row.get('home_team', '')} x {row.get('away_team', '')}",
+                            "Horário": format_kickoff(row.get("kickoff_at")),
                             "Seleção/Item": "",
                             "Gols casa": row.get("home_goals", ""),
                             "Gols fora": row.get("away_goals", ""),
@@ -837,7 +905,8 @@ def build_all_users_predictions_export() -> bytes:
                     )
 
         if not phase_predictions.empty and "user_id" in phase_predictions.columns:
-            user_phase = phase_predictions[phase_predictions["user_id"] == user_id].copy()
+            user_phase = phase_predictions[phase_predictions["user_id"] == user_id].copy(
+            )
 
             for _, row in user_phase.iterrows():
                 rows.append(
@@ -858,7 +927,8 @@ def build_all_users_predictions_export() -> bytes:
                 )
 
         if not bonus_predictions.empty and "user_id" in bonus_predictions.columns:
-            user_bonus = bonus_predictions[bonus_predictions["user_id"] == user_id].copy()
+            user_bonus = bonus_predictions[bonus_predictions["user_id"] == user_id].copy(
+            )
 
             for _, row in user_bonus.iterrows():
                 rows.append(
@@ -880,7 +950,8 @@ def build_all_users_predictions_export() -> bytes:
 
         df = pd.DataFrame(rows)
         if df.empty:
-            df = pd.DataFrame({"Mensagem": ["Usuário ainda não cadastrou previsões."]})
+            df = pd.DataFrame(
+                {"Mensagem": ["Usuário ainda não cadastrou previsões."]})
 
         sheets[str(username)] = df
 
@@ -889,12 +960,14 @@ def build_all_users_predictions_export() -> bytes:
 
 def build_missing_items_for_user(user_id: str) -> tuple[pd.DataFrame, pd.DataFrame]:
     matches = load_table("matches", order_by="match_no")
+    matches = sort_matches_for_display(matches)
     predictions = load_table("predictions")
     phase_predictions = load_table("phase_predictions")
     bonus_predictions = load_table("bonus_predictions")
 
     if matches.empty:
-        pending_matches = pd.DataFrame(columns=["Fase", "Grupo", "Jogo", "match_id"])
+        pending_matches = pd.DataFrame(
+            columns=["Fase", "Grupo", "Jogo", "match_id"])
     else:
         pred_ids = set()
 
@@ -905,12 +978,15 @@ def build_missing_items_for_user(user_id: str) -> tuple[pd.DataFrame, pd.DataFra
                 .tolist()
             )
 
-        missing = matches[~matches["match_id"].astype(str).isin(pred_ids)].copy()
+        missing = matches[~matches["match_id"].astype(
+            str).isin(pred_ids)].copy()
+        missing = sort_matches_for_display(missing)
 
         pending_matches = pd.DataFrame(
             {
                 "Fase": missing["stage"] if "stage" in missing.columns else "",
                 "Grupo": missing["group_name"] if "group_name" in missing.columns else "",
+                "Horário": missing.apply(lambda row: format_kickoff(row.get("kickoff_at")), axis=1),
                 "Jogo": missing.apply(
                     lambda row: f"{row.get('home_team', '')} x {row.get('away_team', '')}",
                     axis=1,
@@ -925,6 +1001,7 @@ def build_missing_items_for_user(user_id: str) -> tuple[pd.DataFrame, pd.DataFra
             pending_matches.insert(0, "Nº", missing["match_no"].values)
 
     phase_config = {
+        "16-avos": 32,
         "Oitavas": 16,
         "Quartas": 8,
         "Semis": 4,
@@ -934,7 +1011,8 @@ def build_missing_items_for_user(user_id: str) -> tuple[pd.DataFrame, pd.DataFra
     extras_rows = []
 
     if not phase_predictions.empty and "user_id" in phase_predictions.columns:
-        user_phase = phase_predictions[phase_predictions["user_id"] == user_id].copy()
+        user_phase = phase_predictions[phase_predictions["user_id"] == user_id].copy(
+        )
     else:
         user_phase = pd.DataFrame()
 
@@ -956,7 +1034,8 @@ def build_missing_items_for_user(user_id: str) -> tuple[pd.DataFrame, pd.DataFra
             )
 
     if not bonus_predictions.empty and "user_id" in bonus_predictions.columns:
-        user_bonus = bonus_predictions[bonus_predictions["user_id"] == user_id].copy()
+        user_bonus = bonus_predictions[bonus_predictions["user_id"] == user_id].copy(
+        )
     else:
         user_bonus = pd.DataFrame()
 
@@ -964,14 +1043,18 @@ def build_missing_items_for_user(user_id: str) -> tuple[pd.DataFrame, pd.DataFra
     scorer_ok = False
 
     if not user_bonus.empty:
-        champion_ok = bool(str(user_bonus.iloc[0].get("champion") or "").strip())
-        scorer_ok = bool(str(user_bonus.iloc[0].get("top_scorer") or "").strip())
+        champion_ok = bool(
+            str(user_bonus.iloc[0].get("champion") or "").strip())
+        scorer_ok = bool(
+            str(user_bonus.iloc[0].get("top_scorer") or "").strip())
 
     if not champion_ok:
-        extras_rows.append({"Tipo": "Extra", "Item": "Campeão", "Status": "Pendente", "Prazo": stage_lock_text("extras"), "Status prazo": "Travado" if is_stage_locked("extras") else "Aberto"})
+        extras_rows.append({"Tipo": "Extra", "Item": "Campeão", "Status": "Pendente", "Prazo": stage_lock_text(
+            "extras"), "Status prazo": "Travado" if is_stage_locked("extras") else "Aberto"})
 
     if not scorer_ok:
-        extras_rows.append({"Tipo": "Extra", "Item": "Artilheiro", "Status": "Pendente", "Prazo": stage_lock_text("extras"), "Status prazo": "Travado" if is_stage_locked("extras") else "Aberto"})
+        extras_rows.append({"Tipo": "Extra", "Item": "Artilheiro", "Status": "Pendente", "Prazo": stage_lock_text(
+            "extras"), "Status prazo": "Travado" if is_stage_locked("extras") else "Aberto"})
 
     pending_extras = pd.DataFrame(extras_rows)
 
@@ -1040,486 +1123,11 @@ def simulate_group_table(group_matches: pd.DataFrame, user_predictions: pd.DataF
 
     df = pd.DataFrame(table.values())
     df["SG"] = df["GP"] - df["GC"]
-    df = df.sort_values(["Pts", "SG", "GP", "Seleção"], ascending=[False, False, False, True]).reset_index(drop=True)
+    df = df.sort_values(["Pts", "SG", "GP", "Seleção"], ascending=[
+                        False, False, False, True]).reset_index(drop=True)
     df.insert(0, "Pos", df.index + 1)
 
     return df
-
-
-
-
-
-# ============================================================
-# GOOGLE CHAT / COMUNICAÇÕES
-# ============================================================
-
-GOOGLE_CHAT_SCOPE = "https://www.googleapis.com/auth/chat.messages.create"
-
-
-def get_secret_json(secret_name: str) -> dict:
-    """Lê um JSON salvo no st.secrets.
-
-    Aceita tanto string TOML com JSON quanto objeto/dict do Streamlit.
-    """
-    try:
-        raw_value = st.secrets.get(secret_name)
-    except Exception:
-        raw_value = None
-
-    if not raw_value:
-        return {}
-
-    if isinstance(raw_value, str):
-        return json.loads(raw_value)
-
-    try:
-        return json.loads(json.dumps(raw_value))
-    except Exception:
-        return dict(raw_value)
-
-
-def normalize_google_token_json(token_data: dict, client_secret_data: dict | None = None) -> dict:
-    """Normaliza o JSON de token para o formato esperado pelo google-auth."""
-    token_data = dict(token_data or {})
-
-    # Alguns exports trazem access_token em vez de token; outros trazem listas.
-    if "token" not in token_data and "access_token" in token_data:
-        token_data["token"] = token_data.pop("access_token")
-
-    for key in ["token", "refresh_token", "client_id", "client_secret", "token_uri"]:
-        if isinstance(token_data.get(key), list):
-            token_data[key] = token_data[key][0] if token_data[key] else ""
-
-    client_block = {}
-    if client_secret_data:
-        client_block = client_secret_data.get("installed") or client_secret_data.get("web") or {}
-
-    token_data.setdefault("token_uri", client_block.get("token_uri", "https://oauth2.googleapis.com/token"))
-    token_data.setdefault("client_id", client_block.get("client_id", ""))
-    token_data.setdefault("client_secret", client_block.get("client_secret", ""))
-    token_data.setdefault("scopes", [GOOGLE_CHAT_SCOPE])
-
-    return token_data
-
-
-def google_chat_config_ok() -> tuple[bool, str]:
-    missing = []
-
-    for key in ["GOOGLE_CHAT_SPACE_ID", "GOOGLE_CHAT_CLIENT_SECRET_JSON", "GOOGLE_CHAT_TOKEN_JSON"]:
-        try:
-            value = st.secrets.get(key)
-        except Exception:
-            value = None
-
-        if not value:
-            missing.append(key)
-
-    if missing:
-        return False, "Faltam secrets: " + ", ".join(missing)
-
-    return True, "Configuração encontrada."
-
-
-def get_chat_service():
-    """Cria serviço do Google Chat usando secrets do Streamlit."""
-    try:
-        from google.auth.transport.requests import Request
-        from google.oauth2.credentials import Credentials
-        from googleapiclient.discovery import build
-        from google.auth.exceptions import RefreshError
-    except Exception as exc:
-        raise RuntimeError(
-            "Dependências do Google Chat não instaladas. Adicione google-auth, "
-            "google-auth-oauthlib e google-api-python-client ao requirements.txt."
-        ) from exc
-
-    client_secret_data = get_secret_json("GOOGLE_CHAT_CLIENT_SECRET_JSON")
-    token_data = normalize_google_token_json(
-        get_secret_json("GOOGLE_CHAT_TOKEN_JSON"),
-        client_secret_data,
-    )
-
-    if not token_data.get("token") and not token_data.get("refresh_token"):
-        raise RuntimeError("GOOGLE_CHAT_TOKEN_JSON não tem token ou refresh_token válido.")
-
-    creds = Credentials.from_authorized_user_info(token_data, [GOOGLE_CHAT_SCOPE])
-
-    if not creds.valid:
-        if creds.expired and creds.refresh_token:
-            try:
-                creds.refresh(Request())
-            except RefreshError as exc:
-                raise RuntimeError(
-                    "Token do Google Chat expirou e não conseguiu renovar. "
-                    "Gere um novo GOOGLE_CHAT_TOKEN_JSON e atualize o Streamlit Secrets."
-                ) from exc
-        else:
-            raise RuntimeError(
-                "Credenciais do Google Chat inválidas. Gere um token OAuth localmente "
-                "e atualize GOOGLE_CHAT_TOKEN_JSON no Streamlit Secrets."
-            )
-
-    return build("chat", "v1", credentials=creds)
-
-
-def get_google_chat_space_id() -> str:
-    try:
-        return st.secrets.get("GOOGLE_CHAT_SPACE_ID", "spaces/AAQAwXXcclU")
-    except Exception:
-        return "spaces/AAQAwXXcclU"
-
-
-def send_google_chat_file(textbody: str, file_path: str, filename: str | None = None, mimetype: str = "image/png"):
-    try:
-        from googleapiclient.http import MediaFileUpload
-    except Exception as exc:
-        raise RuntimeError(
-            "Dependência google-api-python-client não instalada. Adicione ao requirements.txt."
-        ) from exc
-
-    file_path_obj = Path(file_path)
-    if not file_path_obj.exists():
-        raise FileNotFoundError(f"Arquivo não encontrado: {file_path}")
-
-    if filename is None:
-        filename = file_path_obj.name
-
-    service = get_chat_service()
-    space_id = get_google_chat_space_id()
-
-    media = MediaFileUpload(str(file_path_obj), mimetype=mimetype)
-
-    attachment_uploaded = service.media().upload(
-        parent=space_id,
-        body={"filename": filename},
-        media_body=media,
-    ).execute()
-
-    service.spaces().messages().create(
-        parent=space_id,
-        body={
-            "text": textbody,
-            "attachment": [attachment_uploaded],
-        },
-    ).execute()
-
-
-def send_google_chat_image(textbody: str, image_path: str):
-    ext = Path(image_path).suffix.lower()
-
-    if ext in [".jpg", ".jpeg"]:
-        mimetype = "image/jpeg"
-    elif ext == ".png":
-        mimetype = "image/png"
-    elif ext == ".gif":
-        mimetype = "image/gif"
-    elif ext == ".webp":
-        mimetype = "image/webp"
-    else:
-        raise ValueError(f"Extensão de imagem não suportada: {ext}")
-
-    send_google_chat_file(
-        textbody=textbody,
-        file_path=image_path,
-        filename=Path(image_path).name,
-        mimetype=mimetype,
-    )
-
-
-def dataframe_to_png(df: pd.DataFrame, title: str, subtitle: str = "") -> str:
-    """Gera uma imagem PNG simples e legível de uma tabela."""
-    try:
-        import matplotlib.pyplot as plt
-    except Exception as exc:
-        raise RuntimeError("matplotlib não instalado. Adicione matplotlib ao requirements.txt.") from exc
-
-    table_df = df.copy()
-
-    if table_df.empty:
-        table_df = pd.DataFrame({"Mensagem": ["Sem dados para exibir."]})
-
-    # Evita imagens gigantes no Chat. O app continua mostrando a tabela completa.
-    max_rows = 35
-    truncated = False
-    if len(table_df) > max_rows:
-        table_df = table_df.head(max_rows).copy()
-        truncated = True
-
-    table_df = table_df.fillna("").astype(str)
-
-    if truncated:
-        table_df.loc[len(table_df)] = ["..." for _ in table_df.columns]
-
-    n_rows, n_cols = table_df.shape
-    fig_width = max(9, min(18, 1.8 * n_cols + 3))
-    fig_height = max(3.2, min(18, 0.45 * (n_rows + 2) + 1.6))
-
-    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
-    ax.axis("off")
-
-    title_text = title if not subtitle else f"{title}\n{subtitle}"
-    ax.set_title(title_text, fontsize=15, fontweight="bold", pad=18)
-
-    table = ax.table(
-        cellText=table_df.values,
-        colLabels=table_df.columns,
-        cellLoc="center",
-        colLoc="center",
-        loc="center",
-    )
-
-    table.auto_set_font_size(False)
-    table.set_fontsize(9)
-    table.scale(1, 1.35)
-
-    for (row, col), cell in table.get_celld().items():
-        cell.set_edgecolor("#d1d5db")
-        if row == 0:
-            cell.set_facecolor("#ba083a")
-            cell.set_text_props(color="white", weight="bold")
-        elif row % 2 == 0:
-            cell.set_facecolor("#f9fafb")
-        else:
-            cell.set_facecolor("#ffffff")
-
-    output = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-    output.close()
-    fig.tight_layout()
-    fig.savefig(output.name, dpi=180, bbox_inches="tight")
-    plt.close(fig)
-
-    return output.name
-
-
-def build_match_predictions_table(match_id: str) -> tuple[pd.DataFrame, dict]:
-    profiles = load_table("profiles")
-    matches = load_table("matches", order_by="match_no")
-    matches = sort_matches_for_display(matches)
-    predictions = load_table("predictions")
-
-    match_rows = matches[matches["match_id"].astype(str) == str(match_id)] if not matches.empty and "match_id" in matches.columns else pd.DataFrame()
-
-    if match_rows.empty:
-        return pd.DataFrame(), {}
-
-    match = match_rows.iloc[0].to_dict()
-    home_team = match.get("home_team", "")
-    away_team = match.get("away_team", "")
-    stage = match.get("stage", "")
-
-    rows = []
-
-    if profiles.empty:
-        return pd.DataFrame(columns=["Participante", "Palpite", "Classificado", "Atualizado em"]), match
-
-    if predictions.empty:
-        predictions = pd.DataFrame(columns=["user_id", "match_id", "home_goals", "away_goals", "advancing_team", "updated_at"])
-
-    match_predictions = predictions[predictions.get("match_id", pd.Series(dtype=str)).astype(str) == str(match_id)].copy() if "match_id" in predictions.columns else pd.DataFrame()
-
-    for _, user in profiles.sort_values("username").iterrows():
-        user_id = user.get("id")
-        username = user.get("username", "")
-        user_pred = match_predictions[match_predictions["user_id"] == user_id] if not match_predictions.empty and "user_id" in match_predictions.columns else pd.DataFrame()
-
-        if user_pred.empty:
-            rows.append(
-                {
-                    "Participante": username,
-                    "Palpite": "Pendente",
-                    "Classificado": "—" if is_group_stage(stage) else "Pendente",
-                    "Atualizado em": "",
-                }
-            )
-            continue
-
-        pred = user_pred.iloc[0]
-        home_goals = safe_int(pred.get("home_goals"))
-        away_goals = safe_int(pred.get("away_goals"))
-        advancing_team = pred.get("advancing_team") or ""
-
-        if is_knockout_stage(stage) and not advancing_team:
-            if home_goals > away_goals:
-                advancing_team = home_team
-            elif away_goals > home_goals:
-                advancing_team = away_team
-            else:
-                advancing_team = "Não informado"
-
-        rows.append(
-            {
-                "Participante": username,
-                "Palpite": f"{home_team} {home_goals} x {away_goals} {away_team}",
-                "Classificado": "—" if is_group_stage(stage) else advancing_team,
-                "Atualizado em": format_kickoff(pred.get("updated_at")) if "updated_at" in pred else "",
-            }
-        )
-
-    return pd.DataFrame(rows), match
-
-
-def build_match_chat_text(match: dict) -> str:
-    stage = match.get("stage", "")
-    group_name = match.get("group_name", "")
-    home_team = match.get("home_team", "")
-    away_team = match.get("away_team", "")
-    kickoff_text = format_kickoff(match.get("kickoff_at"))
-
-    group_part = f" • Grupo {group_name}" if group_name else ""
-
-    return (
-        "🏆 Kapitalo Cup\n\n"
-        f"Palpites para: {home_team} x {away_team}\n"
-        f"Fase: {stage}{group_part}\n"
-        f"Horário: {kickoff_text}\n\n"
-        "Segue o consolidado dos palpites dos participantes."
-    )
-
-
-def build_ranking_chat_text() -> str:
-    return (
-        "🏆 Kapitalo Cup\n\n"
-        "Ranking atualizado.\n\n"
-        "Segue a classificação geral da Kapitalo Cup."
-    )
-
-
-def render_google_chat_admin_page(matches: pd.DataFrame):
-    st.markdown("### Google Chat")
-    st.caption(
-        "Envie manualmente para o Space os palpites de um jogo ou o ranking atualizado. "
-        "Os dados são lidos do Supabase no momento do envio."
-    )
-
-    config_ok, config_msg = google_chat_config_ok()
-    if config_ok:
-        st.success(f"Google Chat configurado. Space: {get_google_chat_space_id()}")
-    else:
-        st.warning(config_msg)
-        st.info(
-            "Configure GOOGLE_CHAT_SPACE_ID, GOOGLE_CHAT_CLIENT_SECRET_JSON e GOOGLE_CHAT_TOKEN_JSON "
-            "no Streamlit Secrets antes de enviar mensagens."
-        )
-
-    if matches.empty:
-        st.warning("Nenhum jogo encontrado.")
-        return
-
-    tab_match_chat, tab_ranking_chat = st.tabs(["Palpites por jogo", "Ranking atualizado"])
-
-    with tab_match_chat:
-        st.markdown("#### Enviar palpites de um jogo")
-
-        schedule_matches = sort_matches_for_display(matches)
-        stages = schedule_matches["stage"].dropna().unique().tolist() if "stage" in schedule_matches.columns else []
-
-        if not stages:
-            st.info("Nenhuma fase encontrada.")
-            return
-
-        col_stage, col_group = st.columns(2)
-
-        with col_stage:
-            selected_stage = st.selectbox("Fase", stages, key="chat_match_stage")
-
-        filtered = schedule_matches[schedule_matches["stage"] == selected_stage].copy()
-
-        with col_group:
-            if "group_name" in filtered.columns and filtered["group_name"].notna().any():
-                groups = ["Todos"] + sorted(filtered["group_name"].dropna().unique().tolist())
-                selected_group = st.selectbox("Grupo", groups, key="chat_match_group")
-                if selected_group != "Todos":
-                    filtered = filtered[filtered["group_name"] == selected_group]
-            else:
-                st.selectbox("Grupo", ["Não aplicável"], disabled=True, key="chat_match_group_disabled")
-
-        filtered = sort_matches_for_display(filtered)
-
-        match_options = []
-        match_option_map = {}
-        for _, row in filtered.iterrows():
-            label = (
-                f"{format_kickoff(row.get('kickoff_at'))} — "
-                f"{row.get('home_team', '')} x {row.get('away_team', '')} "
-                f"({row.get('match_id', '')})"
-            )
-            match_options.append(label)
-            match_option_map[label] = row.get("match_id")
-
-        if not match_options:
-            st.info("Nenhum jogo encontrado para esse filtro.")
-            return
-
-        selected_match_label = st.selectbox("Jogo", match_options, key="chat_match_selected")
-        selected_match_id = match_option_map[selected_match_label]
-
-        table_df, match_info = build_match_predictions_table(selected_match_id)
-
-        st.markdown("##### Prévia da tabela")
-        st.dataframe(table_df, use_container_width=True, hide_index=True, height=420)
-
-        pending_count = int((table_df["Palpite"] == "Pendente").sum()) if "Palpite" in table_df.columns else 0
-        if pending_count:
-            st.warning(f"Ainda existem {pending_count} participantes sem palpite para este jogo.")
-
-        chat_text = build_match_chat_text(match_info)
-        with st.expander("Prévia da mensagem"):
-            st.text(chat_text)
-
-        if st.button(
-            "Enviar palpites deste jogo para Google Chat",
-            key="send_match_predictions_chat",
-            use_container_width=True,
-            disabled=not config_ok,
-        ):
-            try:
-                title = f"Palpites — {match_info.get('home_team', '')} x {match_info.get('away_team', '')}"
-                subtitle = f"{match_info.get('stage', '')} • {format_kickoff(match_info.get('kickoff_at'))}"
-                image_path = dataframe_to_png(table_df, title=title, subtitle=subtitle)
-                send_google_chat_image(chat_text, image_path)
-                st.success("Palpites enviados para o Google Chat.")
-            except Exception as exc:
-                st.error(f"Erro ao enviar para Google Chat: {exc}")
-
-    with tab_ranking_chat:
-        st.markdown("#### Enviar ranking atualizado")
-
-        data = load_ranking_inputs()
-        ranking = calculate_ranking_cached(
-            profiles=data["profiles"],
-            matches=data["matches"],
-            predictions=data["predictions"],
-            actual_results=data["actual_results"],
-            phase_predictions=data["phase_predictions"],
-            phase_actuals=data["phase_actuals"],
-            bonus_predictions=data["bonus_predictions"],
-            bonus_actuals=data["bonus_actuals"],
-        )
-
-        ranking_view = ranking.drop(columns=["user_id"], errors="ignore")
-        st.markdown("##### Prévia do ranking")
-        st.dataframe(ranking_view, use_container_width=True, hide_index=True, height=420)
-
-        chat_text = build_ranking_chat_text()
-        with st.expander("Prévia da mensagem"):
-            st.text(chat_text)
-
-        if st.button(
-            "Enviar ranking atualizado para Google Chat",
-            key="send_ranking_chat",
-            use_container_width=True,
-            disabled=not config_ok or ranking_view.empty,
-        ):
-            try:
-                image_path = dataframe_to_png(
-                    ranking_view,
-                    title="Ranking Kapitalo Cup",
-                    subtitle=datetime.now().strftime("Atualizado em %d/%m/%Y %H:%M"),
-                )
-                send_google_chat_image(chat_text, image_path)
-                st.success("Ranking enviado para o Google Chat.")
-            except Exception as exc:
-                st.error(f"Erro ao enviar ranking para Google Chat: {exc}")
 
 
 # ============================================================
@@ -1551,7 +1159,7 @@ def build_score_breakdown_for_user(
         if not user_preds.empty:
             match_cols = [
                 col
-                for col in ["match_id", "match_no", "stage", "group_name", "home_team", "away_team"]
+                for col in ["match_id", "match_no", "stage", "group_name", "home_team", "away_team", "kickoff_at"]
                 if col in matches.columns
             ]
 
@@ -1634,7 +1242,8 @@ def build_score_breakdown_for_user(
         and {"phase", "team"}.issubset(phase_predictions.columns)
         and {"phase", "team"}.issubset(phase_actuals.columns)
     ):
-        user_phase = phase_predictions[phase_predictions["user_id"] == user_id].copy()
+        user_phase = phase_predictions[phase_predictions["user_id"] == user_id].copy(
+        )
 
         if not user_phase.empty:
             pp = user_phase.copy()
@@ -1666,7 +1275,8 @@ def build_score_breakdown_for_user(
                     )
 
     if not bonus_predictions.empty and not bonus_actuals.empty:
-        user_bonus = bonus_predictions[bonus_predictions["user_id"] == user_id].copy()
+        user_bonus = bonus_predictions[bonus_predictions["user_id"] == user_id].copy(
+        )
 
         if not user_bonus.empty:
             pred = user_bonus.iloc[0]
@@ -1685,7 +1295,7 @@ def build_score_breakdown_for_user(
                         "Fase": "Extras",
                         "Item": pred.get("champion", ""),
                         "Detalhe": "Campeão correto",
-                        "Pontos": 75,
+                        "Pontos": 100,
                     }
                 )
 
@@ -1696,7 +1306,7 @@ def build_score_breakdown_for_user(
                         "Fase": "Extras",
                         "Item": pred.get("top_scorer", ""),
                         "Detalhe": "Artilheiro correto",
-                        "Pontos": 75,
+                        "Pontos": 100,
                     }
                 )
 
@@ -1749,14 +1359,17 @@ def calculate_ranking_cached(
         )
 
     ranking = pd.DataFrame(ranking_rows)
-    ranking = ranking.sort_values("Pontuação", ascending=False).reset_index(drop=True)
+    ranking = ranking.sort_values(
+        "Pontuação", ascending=False).reset_index(drop=True)
     ranking.insert(0, "Posição", ranking.index + 1)
 
     return ranking
 
+
 def load_ranking_inputs():
     profiles = load_table("profiles")
     matches = load_table("matches", order_by="match_no")
+    matches = sort_matches_for_display(matches)
     predictions = load_table("predictions")
     actual_results = load_table("actual_results")
     phase_predictions = load_table("phase_predictions")
@@ -1794,6 +1407,7 @@ def calculate_ranking() -> pd.DataFrame:
 # SIDEBAR
 # ============================================================
 
+
 def render_auth_sidebar():
     with st.sidebar:
         render_logo_sidebar()
@@ -1804,7 +1418,8 @@ def render_auth_sidebar():
 
         with tab_login:
             username = st.text_input("Usuário", key="login_username")
-            password = st.text_input("Senha", type="password", key="login_password")
+            password = st.text_input(
+                "Senha", type="password", key="login_password")
 
             if st.button("Entrar", key="btn_login", use_container_width=True):
                 ok, msg = login_user(username, password)
@@ -1818,7 +1433,8 @@ def render_auth_sidebar():
 
         with tab_create:
             new_username = st.text_input("Novo usuário", key="new_username")
-            new_password = st.text_input("Nova senha", type="password", key="new_password")
+            new_password = st.text_input(
+                "Nova senha", type="password", key="new_password")
 
             if st.button("Cadastrar", key="btn_create_user", use_container_width=True):
                 ok, msg = create_user(new_username, new_password)
@@ -1828,7 +1444,6 @@ def render_auth_sidebar():
                     clear_data_cache()
                 else:
                     st.error(msg)
-
 
 
 def render_logged_sidebar():
@@ -1852,7 +1467,8 @@ def render_logged_sidebar():
             st.warning("Todos os prazos de palpites estão encerrados.")
         else:
             next_key, next_at = next_lock
-            st.info(f"Próximo prazo: {get_lock_label_from_key(next_key)} até {next_at.strftime('%d/%m/%Y %H:%M')}.")
+            st.info(
+                f"Próximo prazo: {get_lock_label_from_key(next_key)} até {next_at.strftime('%d/%m/%Y %H:%M')}.")
 
         if st.button("Sair", key="btn_logout", use_container_width=True):
             logout()
@@ -1883,7 +1499,6 @@ def render_logged_sidebar():
         return page
 
 
-
 # ============================================================
 # PÁGINA: INÍCIO / CHECKLIST
 # ============================================================
@@ -1898,6 +1513,7 @@ def render_home_page():
 
     pending_matches, pending_extras = build_missing_items_for_user(user_id)
     matches = load_table("matches", order_by="match_no")
+    matches = sort_matches_for_display(matches)
     predictions = load_table("predictions")
 
     total_matches = len(matches) if not matches.empty else 0
@@ -1938,7 +1554,8 @@ def render_home_page():
             metric_box("Próximo prazo", get_lock_label_from_key(next_key))
 
     if next_lock is None:
-        st.warning("Todos os prazos de cadastro/alteração de palpites estão encerrados.")
+        st.warning(
+            "Todos os prazos de cadastro/alteração de palpites estão encerrados.")
     else:
         next_key, next_at = next_lock
         st.success(
@@ -1946,7 +1563,7 @@ def render_home_page():
         )
 
     with st.expander("Ver prazos por fase", expanded=True):
-        st.dataframe(lock_schedule, use_container_width=True, hide_index=True)
+        st.dataframe(lock_schedule.drop(columns=["Chave no secrets.toml"], errors="ignore"), use_container_width=True, hide_index=True)
 
     st.download_button(
         label="Baixar minhas previsões em Excel",
@@ -1958,7 +1575,8 @@ def render_home_page():
 
     st.divider()
 
-    tab_games, tab_extras = st.tabs(["Jogos pendentes", "Classificados e extras pendentes"])
+    tab_games, tab_extras = st.tabs(
+        ["Jogos pendentes", "Classificados e extras pendentes"])
 
     with tab_games:
         st.markdown("### Jogos que faltam preencher")
@@ -1969,16 +1587,18 @@ def render_home_page():
             st.caption(
                 "A lista mostra primeiro os jogos cadastrados na base. No começo, aparecem só jogos da fase de grupos; quando novos jogos forem cadastrados pelo admin, eles também aparecerão aqui."
             )
-            st.dataframe(pending_matches, use_container_width=True, hide_index=True, height=360)
+            st.dataframe(pending_matches, use_container_width=True,
+                         hide_index=True, height=360)
 
     with tab_extras:
         st.markdown("### Extras e classificados pendentes")
 
         if pending_extras.empty:
-            st.success("Você já preencheu os classificados e extras previstos no sistema.")
+            st.success(
+                "Você já preencheu os classificados e extras previstos no sistema.")
         else:
-            st.dataframe(pending_extras, use_container_width=True, hide_index=True, height=320)
-
+            st.dataframe(pending_extras, use_container_width=True,
+                         hide_index=True, height=320)
 
 
 # ============================================================
@@ -2057,7 +1677,8 @@ def render_ranking():
             bonus_actuals=data["bonus_actuals"],
         )
 
-        total_points = int(breakdown["Pontos"].sum()) if not breakdown.empty else 0
+        total_points = int(breakdown["Pontos"].sum()
+                           ) if not breakdown.empty else 0
 
         col_a, col_b, col_c = st.columns(3)
 
@@ -2071,7 +1692,8 @@ def render_ranking():
             metric_box("Itens pontuados", str(len(breakdown)))
 
         if breakdown.empty:
-            st.info("Esse jogador ainda não pontuou ou ainda não há resultados oficiais cadastrados.")
+            st.info(
+                "Esse jogador ainda não pontuou ou ainda não há resultados oficiais cadastrados.")
             return
 
         summary = (
@@ -2084,7 +1706,8 @@ def render_ranking():
         st.markdown("#### Resumo por categoria")
         st.dataframe(summary, use_container_width=True, hide_index=True)
 
-        category_options = ["Todas"] + sorted(breakdown["Categoria"].dropna().unique().tolist())
+        category_options = [
+            "Todas"] + sorted(breakdown["Categoria"].dropna().unique().tolist())
 
         selected_category = st.selectbox(
             "Filtrar categoria",
@@ -2095,10 +1718,12 @@ def render_ranking():
         detail_view = breakdown.copy()
 
         if selected_category != "Todas":
-            detail_view = detail_view[detail_view["Categoria"] == selected_category].copy()
+            detail_view = detail_view[detail_view["Categoria"]
+                                      == selected_category].copy()
 
         st.markdown("#### Pontos conquistados")
-        st.dataframe(detail_view, use_container_width=True, hide_index=True, height=420)
+        st.dataframe(detail_view, use_container_width=True,
+                     hide_index=True, height=420)
 
 
 # ============================================================
@@ -2115,15 +1740,18 @@ def render_predictions_page():
     username = st.session_state.get("username", "")
     supabase = get_client()
     matches = load_table("matches", order_by="match_no")
+    matches = sort_matches_for_display(matches)
 
     if matches.empty:
-        st.warning("Nenhum jogo encontrado. Rode o seed com `python -m src.seed`.")
+        st.warning(
+            "Nenhum jogo encontrado. Rode o seed com `python -m src.seed`.")
         return
 
     predictions = load_table("predictions")
 
     if not predictions.empty and "user_id" in predictions.columns:
-        user_predictions = predictions[predictions["user_id"] == user_id].copy()
+        user_predictions = predictions[predictions["user_id"] == user_id].copy(
+        )
     else:
         user_predictions = pd.DataFrame()
 
@@ -2134,6 +1762,7 @@ def render_predictions_page():
             <p style="color:#6b7280;margin-bottom:0;">
                 Escolha a fase e, na fase de grupos, preencha um grupo por vez.
                 A tabela do grupo é simulada automaticamente com os placares que você salvou.
+                Os jogos sem palpite salvo começam vazios para evitar salvar 0x0 sem querer.
             </p>
         </div>
         """,
@@ -2149,7 +1778,8 @@ def render_predictions_page():
         key="download_user_predictions_from_predictions_page",
     )
 
-    stages = matches["stage"].dropna().unique().tolist() if "stage" in matches.columns else []
+    stages = matches["stage"].dropna().unique(
+    ).tolist() if "stage" in matches.columns else []
 
     if not stages:
         st.warning("A tabela de jogos não possui a coluna `stage` preenchida.")
@@ -2161,7 +1791,8 @@ def render_predictions_page():
         selected_stage = st.selectbox("Fase", stages, key="pred_stage")
 
     selected_stage_locked = is_stage_locked(selected_stage)
-    render_stage_lock_message(selected_stage, label=f"Fase selecionada — {selected_stage}")
+    render_stage_lock_message(
+        selected_stage, label=f"Fase selecionada — {selected_stage}")
 
     filtered = matches[matches["stage"] == selected_stage].copy()
 
@@ -2173,13 +1804,15 @@ def render_predictions_page():
             selected_group = st.selectbox("Grupo", groups, key="pred_group")
             filtered = filtered[filtered["group_name"] == selected_group]
         else:
-            st.selectbox("Grupo", ["Não aplicável"], disabled=True, key="pred_group_disabled")
+            st.selectbox("Grupo", ["Não aplicável"],
+                         disabled=True, key="pred_group_disabled")
 
     saved_ids = set()
     if not user_predictions.empty and "match_id" in user_predictions.columns:
         saved_ids = set(user_predictions["match_id"].astype(str).tolist())
 
-    filtered_ids = set(filtered["match_id"].astype(str).tolist()) if "match_id" in filtered.columns else set()
+    filtered_ids = set(filtered["match_id"].astype(
+        str).tolist()) if "match_id" in filtered.columns else set()
     saved_in_screen = len(saved_ids.intersection(filtered_ids))
     total_in_screen = len(filtered)
 
@@ -2199,9 +1832,15 @@ def render_predictions_page():
     if selected_group and not filtered.empty and is_group_stage(selected_stage):
         with st.expander("Tabela simulada do grupo com seus palpites salvos", expanded=True):
             group_table = simulate_group_table(filtered, user_predictions)
-            st.dataframe(group_table, use_container_width=True, hide_index=True)
+            st.dataframe(group_table, use_container_width=True,
+                         hide_index=True)
 
-    filtered = filtered.sort_values("match_no") if "match_no" in filtered.columns else filtered
+    filtered = sort_matches_for_display(filtered)
+
+    # Guarda os jogos visíveis na tela para permitir salvar o grupo inteiro.
+    # Precisa ser inicializado antes do loop de cards; caso contrário,
+    # o Streamlit quebra quando tenta fazer append no primeiro jogo.
+    visible_prediction_rows = []
 
     for _, match in filtered.iterrows():
         match_id = match["match_id"]
@@ -2212,20 +1851,32 @@ def render_predictions_page():
         away_team = match["away_team"]
         match_no = match.get("match_no", "")
         group_name = match.get("group_name", "")
+        kickoff_text = format_kickoff(match.get("kickoff_at"))
 
         existing = pd.DataFrame()
 
         if not user_predictions.empty:
             existing = user_predictions[user_predictions["match_id"] == match_id]
 
-        default_home = 0
-        default_away = 0
+        default_home = None
+        default_away = None
         default_advancing = ""
 
         if not existing.empty:
             default_home = safe_int(existing.iloc[0].get("home_goals"))
             default_away = safe_int(existing.iloc[0].get("away_goals"))
             default_advancing = existing.iloc[0].get("advancing_team") or ""
+
+        visible_prediction_rows.append(
+            {
+                "match_id": match_id,
+                "stage": stage,
+                "home_team": home_team,
+                "away_team": away_team,
+                "match_no": match_no,
+                "label": f"Jogo {match_no} — {kickoff_text} — {home_team} x {away_team}",
+            }
+        )
 
         st.markdown('<div class="match-card">', unsafe_allow_html=True)
 
@@ -2236,7 +1887,7 @@ def render_predictions_page():
             f"""
             <div class="match-title">{home_team} x {away_team}</div>
             <div class="match-meta">
-                Jogo {match_no} {f"• Grupo {group_name}" if group_name else ""} &nbsp; {saved_badge} &nbsp; {lock_badge}
+                Jogo {match_no} • {kickoff_text} {f"• Grupo {group_name}" if group_name else ""} &nbsp; {saved_badge} &nbsp; {lock_badge}
             </div>
             """,
             unsafe_allow_html=True,
@@ -2284,7 +1935,8 @@ def render_predictions_page():
                 advancing_index = 0
 
                 if default_advancing in advancing_options:
-                    advancing_index = advancing_options.index(default_advancing)
+                    advancing_index = advancing_options.index(
+                        default_advancing)
 
                 advancing_team = st.selectbox(
                     "Classificado",
@@ -2294,7 +1946,8 @@ def render_predictions_page():
                     disabled=match_locked,
                 )
         else:
-            st.caption("Fase de grupos: aqui você preenche apenas o placar. Classificados são preenchidos na aba Classificados e extras.")
+            st.caption(
+                "Fase de grupos: aqui você preenche apenas o placar. Classificados são preenchidos na aba Classificados e extras.")
 
         save_col1, save_col2 = st.columns([1, 4])
 
@@ -2306,7 +1959,13 @@ def render_predictions_page():
                 disabled=match_locked,
             ):
                 if is_stage_locked(stage):
-                    st.error(f"Não é possível alterar este jogo. O prazo de {stage} encerrou em {stage_lock_text(stage)}.")
+                    st.error(
+                        f"Não é possível alterar este jogo. O prazo de {stage} encerrou em {stage_lock_text(stage)}.")
+                    st.stop()
+
+                if home_goals is None or away_goals is None:
+                    st.error(
+                        f"Preencha o placar de {home_team} x {away_team} antes de salvar.")
                     st.stop()
 
                 payload = {
@@ -2338,6 +1997,76 @@ def render_predictions_page():
 
         st.markdown("</div>", unsafe_allow_html=True)
 
+    if selected_group and is_group_stage(selected_stage) and not filtered.empty:
+        st.divider()
+        st.markdown("### Salvar grupo inteiro")
+        st.caption(
+            "Use este botão para salvar todos os jogos do grupo selecionado de uma vez. "
+            "Jogos ainda vazios serão listados para você preencher antes de salvar."
+        )
+
+        if st.button(
+            f"Salvar todos os palpites do Grupo {selected_group}",
+            key=f"save_all_group_{selected_stage}_{selected_group}",
+            use_container_width=True,
+            disabled=selected_stage_locked,
+        ):
+            if is_stage_locked(selected_stage):
+                st.error(
+                    f"Não é possível alterar este grupo. O prazo de {selected_stage} encerrou em {stage_lock_text(selected_stage)}."
+                )
+                st.stop()
+
+            invalid_rows = []
+            payload_rows = []
+
+            for item in visible_prediction_rows:
+                match_id = item["match_id"]
+                home_key = f"pred_home_{match_id}"
+                away_key = f"pred_away_{match_id}"
+                home_value = st.session_state.get(home_key)
+                away_value = st.session_state.get(away_key)
+
+                if home_value is None or away_value is None:
+                    invalid_rows.append(item["label"])
+                    continue
+
+                payload_rows.append(
+                    {
+                        "user_id": user_id,
+                        "match_id": match_id,
+                        "home_goals": int(home_value),
+                        "away_goals": int(away_value),
+                        "advancing_team": None,
+                    }
+                )
+
+            if invalid_rows:
+                st.error(
+                    "Não foi possível salvar o grupo inteiro. Preencha os placares destes jogos:"
+                )
+                st.write(pd.DataFrame(
+                    {"Jogos sem placar preenchido": invalid_rows}))
+                st.stop()
+
+            if not payload_rows:
+                st.warning("Não há jogos para salvar neste grupo.")
+                st.stop()
+
+            try:
+                supabase.table("predictions").upsert(
+                    payload_rows,
+                    on_conflict="user_id,match_id",
+                ).execute()
+
+                clear_data_cache()
+                st.success(
+                    f"Todos os palpites do Grupo {selected_group} foram salvos.")
+                st.rerun()
+
+            except Exception as exc:
+                st.error(f"Erro ao salvar o grupo inteiro: {exc}")
+
 
 # ============================================================
 # PÁGINA: CLASSIFICADOS E EXTRAS
@@ -2346,13 +2075,15 @@ def render_predictions_page():
 
 def render_phase_predictions_page():
     if not st.session_state.get("is_logged_in", False):
-        st.warning("Você precisa fazer login para preencher classificados e extras.")
+        st.warning(
+            "Você precisa fazer login para preencher classificados e extras.")
         return
 
     user_id = st.session_state["user_id"]
     username = st.session_state.get("username", "")
     supabase = get_client()
     matches = load_table("matches", order_by="match_no")
+    matches = sort_matches_for_display(matches)
     teams = get_all_teams(matches)
 
     if not teams:
@@ -2382,6 +2113,7 @@ def render_phase_predictions_page():
     )
 
     phase_config = {
+        "16-avos": 32,
         "Oitavas": 16,
         "Quartas": 8,
         "Semis": 4,
@@ -2391,7 +2123,8 @@ def render_phase_predictions_page():
     existing_phase = load_table("phase_predictions")
 
     if not existing_phase.empty and "user_id" in existing_phase.columns:
-        existing_phase = existing_phase[existing_phase["user_id"] == user_id].copy()
+        existing_phase = existing_phase[existing_phase["user_id"] == user_id].copy(
+        )
     else:
         existing_phase = pd.DataFrame()
 
@@ -2402,7 +2135,8 @@ def render_phase_predictions_page():
     )
 
     phase_locked = is_stage_locked(selected_phase)
-    render_stage_lock_message(selected_phase, label=f"Classificados — {selected_phase}")
+    render_stage_lock_message(
+        selected_phase, label=f"Classificados — {selected_phase}")
 
     max_teams = phase_config[selected_phase]
 
@@ -2410,7 +2144,8 @@ def render_phase_predictions_page():
 
     if not existing_phase.empty:
         default_selected = set(
-            existing_phase[existing_phase["phase"] == selected_phase]["team"].tolist()
+            existing_phase[existing_phase["phase"]
+                           == selected_phase]["team"].tolist()
         )
 
     st.markdown(f"### {selected_phase}")
@@ -2455,7 +2190,8 @@ def render_phase_predictions_page():
             use_container_width=True,
         ):
             if is_stage_locked(selected_phase):
-                st.error(f"Não é possível alterar {selected_phase}. O prazo encerrou em {stage_lock_text(selected_phase)}.")
+                st.error(
+                    f"Não é possível alterar {selected_phase}. O prazo encerrou em {stage_lock_text(selected_phase)}.")
                 st.stop()
 
             try:
@@ -2505,7 +2241,8 @@ def render_phase_predictions_page():
     updated_phase = load_table("phase_predictions")
 
     if not updated_phase.empty and "user_id" in updated_phase.columns:
-        updated_phase = updated_phase[updated_phase["user_id"] == user_id].copy()
+        updated_phase = updated_phase[updated_phase["user_id"] == user_id].copy(
+        )
 
     if updated_phase.empty:
         st.info("Você ainda não salvou classificados.")
@@ -2527,7 +2264,8 @@ def render_phase_predictions_page():
     existing_bonus = load_table("bonus_predictions")
 
     if not existing_bonus.empty and "user_id" in existing_bonus.columns:
-        user_bonus = existing_bonus[existing_bonus["user_id"] == user_id].copy()
+        user_bonus = existing_bonus[existing_bonus["user_id"] == user_id].copy(
+        )
     else:
         user_bonus = pd.DataFrame()
 
@@ -2539,7 +2277,8 @@ def render_phase_predictions_page():
         default_top_scorer = user_bonus.iloc[0].get("top_scorer") or ""
 
     champion_options = [""] + teams
-    champion_index = champion_options.index(default_champion) if default_champion in champion_options else 0
+    champion_index = champion_options.index(
+        default_champion) if default_champion in champion_options else 0
 
     extras_locked = is_stage_locked("extras")
     render_stage_lock_message("extras", label="Extras — campeão e artilheiro")
@@ -2570,7 +2309,8 @@ def render_phase_predictions_page():
         disabled=extras_locked,
     ):
         if is_stage_locked("extras"):
-            st.error(f"Não é possível alterar extras. O prazo encerrou em {stage_lock_text('extras')}.")
+            st.error(
+                f"Não é possível alterar extras. O prazo encerrou em {stage_lock_text('extras')}.")
             st.stop()
 
         payload = {
@@ -2608,50 +2348,58 @@ def render_rules_page():
             {
                 "Fase": "Primeira Fase / Grupos",
                 "Jogos": 72,
-                "Resultado": 5,
-                "Placar exato": "+5",
-                "Classificado": 5,
-                "Total possível": 880,
+                "Resultado": 7,
+                "Placar exato": "+7",
+                "Classificado": 0,
+                "Total possível": 1008,
+            },
+            {
+                "Fase": "16-avos de Final",
+                "Jogos": 16,
+                "Resultado": 10,
+                "Placar exato": "+10",
+                "Classificado": 10,
+                "Total possível": 480,
             },
             {
                 "Fase": "Oitavas de Final",
                 "Jogos": 8,
-                "Resultado": 10,
-                "Placar exato": "+10",
-                "Classificado": 10,
-                "Total possível": 240,
+                "Resultado": 12,
+                "Placar exato": "+12",
+                "Classificado": 12,
+                "Total possível": 288,
             },
             {
                 "Fase": "Quartas de Final",
                 "Jogos": 4,
-                "Resultado": 13,
-                "Placar exato": "+13",
-                "Classificado": 13,
-                "Total possível": 156,
+                "Resultado": 15,
+                "Placar exato": "+15",
+                "Classificado": 15,
+                "Total possível": 180,
             },
             {
                 "Fase": "Semifinais",
                 "Jogos": 2,
-                "Resultado": 16,
-                "Placar exato": "+16",
-                "Classificado": 16,
-                "Total possível": 96,
+                "Resultado": 20,
+                "Placar exato": "+20",
+                "Classificado": 20,
+                "Total possível": 120,
             },
             {
                 "Fase": "3º e 4º Lugar",
                 "Jogos": 1,
-                "Resultado": 10,
-                "Placar exato": "+10",
-                "Classificado": 10,
-                "Total possível": 30,
+                "Resultado": 15,
+                "Placar exato": "+15",
+                "Classificado": 15,
+                "Total possível": 45,
             },
             {
                 "Fase": "Final",
                 "Jogos": 1,
-                "Resultado": 20,
-                "Placar exato": "+20",
-                "Classificado": 20,
-                "Total possível": 60,
+                "Resultado": 25,
+                "Placar exato": "+25",
+                "Classificado": 25,
+                "Total possível": 75,
             },
         ]
     )
@@ -2692,8 +2440,8 @@ def render_rules_page():
             """
             <div class="rules-card">
             <h3>Extras</h3>
-            <p><b>Campeão:</b> 75 pontos</p>
-            <p><b>Artilheiro:</b> 75 pontos</p>
+            <p><b>Campeão:</b> 100 pontos</p>
+            <p><b>Artilheiro:</b> 100 pontos</p>
             </div>
             """,
             unsafe_allow_html=True,
@@ -2733,15 +2481,16 @@ def render_admin_page():
 
     supabase = get_client()
     matches = load_table("matches", order_by="match_no")
+    matches = sort_matches_for_display(matches)
 
     if matches.empty:
         st.warning("Nenhum jogo encontrado.")
         return
 
-    tab_results, tab_chat, tab_phase_actuals, tab_bonus_actuals = st.tabs(
+    tab_results, tab_schedule, tab_phase_actuals, tab_bonus_actuals = st.tabs(
         [
             "Resultados dos jogos",
-            "Google Chat",
+            "Horários dos jogos",
             "Classificados reais",
             "Extras reais",
         ]
@@ -2763,11 +2512,14 @@ def render_admin_page():
 
         with top_col2:
             if "group_name" in filtered.columns and filtered["group_name"].notna().any():
-                groups = sorted(filtered["group_name"].dropna().unique().tolist())
-                selected_group = st.selectbox("Grupo", groups, key="admin_group")
+                groups = sorted(
+                    filtered["group_name"].dropna().unique().tolist())
+                selected_group = st.selectbox(
+                    "Grupo", groups, key="admin_group")
                 filtered = filtered[filtered["group_name"] == selected_group]
             else:
-                st.selectbox("Grupo", ["Não aplicável"], disabled=True, key="admin_group_disabled")
+                st.selectbox("Grupo", ["Não aplicável"],
+                             disabled=True, key="admin_group_disabled")
 
         with top_col3:
             st.markdown("<br>", unsafe_allow_html=True)
@@ -2778,7 +2530,7 @@ def render_admin_page():
                 unsafe_allow_html=True,
             )
 
-        filtered = filtered.sort_values("match_no") if "match_no" in filtered.columns else filtered
+        filtered = sort_matches_for_display(filtered)
 
         for _, match in filtered.iterrows():
             match_id = match["match_id"]
@@ -2786,6 +2538,7 @@ def render_admin_page():
             home_team = match["home_team"]
             away_team = match["away_team"]
             match_no = match.get("match_no", "")
+            kickoff_text = format_kickoff(match.get("kickoff_at"))
 
             existing = pd.DataFrame()
 
@@ -2799,7 +2552,8 @@ def render_admin_page():
             if not existing.empty:
                 default_home = safe_int(existing.iloc[0].get("home_goals"))
                 default_away = safe_int(existing.iloc[0].get("away_goals"))
-                default_advancing = existing.iloc[0].get("advancing_team") or ""
+                default_advancing = existing.iloc[0].get(
+                    "advancing_team") or ""
 
             st.markdown('<div class="match-card">', unsafe_allow_html=True)
 
@@ -2808,7 +2562,7 @@ def render_admin_page():
             st.markdown(
                 f"""
                 <div class="match-title">{home_team} x {away_team}</div>
-                <div class="match-meta">Jogo {match_no} &nbsp; {result_badge}</div>
+                <div class="match-meta">Jogo {match_no} • {kickoff_text} &nbsp; {result_badge}</div>
                 """,
                 unsafe_allow_html=True,
             )
@@ -2853,7 +2607,8 @@ def render_admin_page():
                     advancing_index = 0
 
                     if default_advancing in advancing_options:
-                        advancing_index = advancing_options.index(default_advancing)
+                        advancing_index = advancing_options.index(
+                            default_advancing)
 
                     advancing_team = st.selectbox(
                         "Classificado",
@@ -2862,7 +2617,8 @@ def render_admin_page():
                         key=f"actual_adv_{match_id}",
                     )
             else:
-                st.caption("Fase de grupos: cadastre apenas o placar. Classificados reais ficam na aba Classificados reais.")
+                st.caption(
+                    "Fase de grupos: cadastre apenas o placar. Classificados reais ficam na aba Classificados reais.")
 
             save_col1, save_col2 = st.columns([1, 4])
 
@@ -2896,8 +2652,95 @@ def render_admin_page():
 
             st.markdown("</div>", unsafe_allow_html=True)
 
-    with tab_chat:
-        render_google_chat_admin_page(matches)
+    with tab_schedule:
+        st.markdown("### Horários dos jogos")
+        st.caption(
+            "Cadastre ou ajuste os horários em horário do Brasil/São Paulo. "
+            "O app usa esses horários para ordenar os jogos."
+        )
+
+        schedule_matches = sort_matches_for_display(matches)
+        stages_schedule = schedule_matches["stage"].dropna().unique().tolist() if "stage" in schedule_matches.columns else []
+
+        if not stages_schedule:
+            st.info("Nenhuma fase encontrada na tabela de jogos.")
+        else:
+            selected_schedule_stage = st.selectbox(
+                "Fase",
+                stages_schedule,
+                key="admin_schedule_stage",
+            )
+
+            schedule_filtered = schedule_matches[schedule_matches["stage"] == selected_schedule_stage].copy()
+
+            if "group_name" in schedule_filtered.columns and schedule_filtered["group_name"].notna().any():
+                schedule_groups = ["Todos"] + sorted(schedule_filtered["group_name"].dropna().unique().tolist())
+                selected_schedule_group = st.selectbox(
+                    "Grupo",
+                    schedule_groups,
+                    key="admin_schedule_group",
+                )
+
+                if selected_schedule_group != "Todos":
+                    schedule_filtered = schedule_filtered[schedule_filtered["group_name"] == selected_schedule_group]
+
+            schedule_filtered = sort_matches_for_display(schedule_filtered)
+
+            for _, match in schedule_filtered.iterrows():
+                match_id = match["match_id"]
+                match_no = match.get("match_no", "")
+                home_team = match.get("home_team", "")
+                away_team = match.get("away_team", "")
+                current_kickoff = match.get("kickoff_at")
+                current_dt = pd.to_datetime(current_kickoff, errors="coerce")
+
+                if pd.isna(current_dt):
+                    default_date = datetime.now().date()
+                    default_time = datetime.now().time().replace(second=0, microsecond=0)
+                else:
+                    default_date = current_dt.date()
+                    default_time = current_dt.time().replace(second=0, microsecond=0)
+
+                with st.container(border=True):
+                    st.markdown(f"**Jogo {match_no} — {home_team} x {away_team}**")
+                    st.caption(f"Atual: {format_kickoff(current_kickoff)}")
+
+                    col_date, col_time, col_button = st.columns([1, 1, 1])
+
+                    with col_date:
+                        new_date = st.date_input(
+                            "Data",
+                            value=default_date,
+                            key=f"kickoff_date_{match_id}",
+                        )
+
+                    with col_time:
+                        new_time = st.time_input(
+                            "Horário Brasil",
+                            value=default_time,
+                            key=f"kickoff_time_{match_id}",
+                        )
+
+                    with col_button:
+                        st.markdown("<br>", unsafe_allow_html=True)
+
+                        if st.button("Salvar horário", key=f"save_kickoff_{match_id}", use_container_width=True):
+                            kickoff_value = f"{new_date} {new_time.strftime('%H:%M:%S')}"
+
+                            try:
+                                supabase.table("matches").update(
+                                    {"kickoff_at": kickoff_value}
+                                ).eq(
+                                    "match_id", match_id
+                                ).execute()
+
+                                clear_data_cache()
+                                st.success("Horário salvo.")
+                                st.rerun()
+
+                            except Exception as exc:
+                                st.error(f"Erro ao salvar horário: {exc}")
+
 
     with tab_phase_actuals:
         st.markdown("### Classificados reais")
@@ -2909,6 +2752,7 @@ def render_admin_page():
             return
 
         phase_config = {
+            "16-avos": 32,
             "Oitavas": 16,
             "Quartas": 8,
             "Semis": 4,
@@ -2929,10 +2773,12 @@ def render_admin_page():
 
         if not existing_actuals.empty:
             default_selected = set(
-                existing_actuals[existing_actuals["phase"] == selected_phase]["team"].tolist()
+                existing_actuals[existing_actuals["phase"]
+                                 == selected_phase]["team"].tolist()
             )
 
-        st.caption(f"Selecione até {max_teams} seleções para {selected_phase}.")
+        st.caption(
+            f"Selecione até {max_teams} seleções para {selected_phase}.")
 
         selected_teams = []
 
@@ -2988,7 +2834,8 @@ def render_admin_page():
                         supabase.table("phase_actuals").insert(rows).execute()
 
                     clear_data_cache()
-                    st.success(f"Classificados reais de {selected_phase} salvos.")
+                    st.success(
+                        f"Classificados reais de {selected_phase} salvos.")
                     st.rerun()
 
                 except Exception as exc:
@@ -3022,7 +2869,8 @@ def render_admin_page():
             default_top_scorer = bonus_actuals.iloc[0].get("top_scorer") or ""
 
         champion_options = [""] + teams
-        champion_index = champion_options.index(default_champion) if default_champion in champion_options else 0
+        champion_index = champion_options.index(
+            default_champion) if default_champion in champion_options else 0
 
         col1, col2 = st.columns(2)
 
