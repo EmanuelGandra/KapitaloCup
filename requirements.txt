@@ -4,3 +4,7 @@ supabase>=2.0
 streamlit-autorefresh>=1.0.1
 openpyxl>=3.1.2
 matplotlib
+google-auth
+google-auth-oauthlib
+google-api-python-client
+matplotlib
