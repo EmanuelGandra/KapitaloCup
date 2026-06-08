@@ -2415,7 +2415,7 @@ def render_ranking():
 
 
 
-def render_bonus_predictions_section(user_id: str, teams: list[str], supabase, key_suffix: str = "main"):
+def render_bonus_predictions_section(user_id: str, teams: list[str], supabase):
     """Escolha de campeão e artilheiro dentro da tela de palpites da fase de grupos."""
     st.markdown("### Extras antes da Copa")
     render_stage_lock_message("extras", label="Extras — campeão e artilheiro")
@@ -2445,7 +2445,7 @@ def render_bonus_predictions_section(user_id: str, teams: list[str], supabase, k
             "Campeão",
             champion_options,
             index=champion_index,
-            key=f"bonus_champion_inline_{key_suffix}",
+            key="bonus_champion_inline",
             disabled=extras_locked,
         )
 
@@ -2453,7 +2453,7 @@ def render_bonus_predictions_section(user_id: str, teams: list[str], supabase, k
         top_scorer = st.text_input(
             "Artilheiro",
             value=default_top_scorer,
-            key=f"bonus_top_scorer_inline_{key_suffix}",
+            key="bonus_top_scorer_inline",
             disabled=extras_locked,
         )
 
@@ -2461,7 +2461,7 @@ def render_bonus_predictions_section(user_id: str, teams: list[str], supabase, k
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button(
             "Salvar extras",
-            key=f"save_bonus_inline_{key_suffix}",
+            key="save_bonus_inline",
             use_container_width=True,
             disabled=extras_locked,
         ):
@@ -2633,25 +2633,14 @@ def group_table_from_input_rows(group_matches: pd.DataFrame, input_rows: list[di
     return compact_group_table(table)
 
 
-def build_user_template_excel(user_id: str, selected_stage: str | None = None) -> bytes:
-    """Gera um Excel-template para o usuário preencher fora do app e importar de volta.
-
-    Quando selected_stage é informado, o template vem apenas com os jogos daquela fase.
-    Isso é melhor para fases futuras, porque o usuário baixa/preenche só o bloco que está aberto.
-    """
+def build_user_template_excel(user_id: str) -> bytes:
+    """Gera um Excel-template para o usuário preencher fora do app e importar de volta."""
     matches = sort_matches_for_display(load_table("matches", order_by="match_no"))
     predictions = load_table("predictions")
     bonus_predictions = load_table("bonus_predictions")
 
     if matches.empty:
         return create_excel_bytes({"Palpites": pd.DataFrame()})
-
-    if selected_stage and "stage" in matches.columns:
-        matches = matches[matches["stage"] == selected_stage].copy()
-        matches = sort_matches_for_display(matches)
-
-    if matches.empty:
-        return create_excel_bytes({"Palpites": pd.DataFrame({"Mensagem": ["Nenhum jogo encontrado para esta fase."]})})
 
     user_predictions = pd.DataFrame()
     if not predictions.empty and "user_id" in predictions.columns:
@@ -2720,128 +2709,50 @@ def build_user_template_excel(user_id: str, selected_stage: str | None = None) -
     return create_excel_bytes({"Palpites": out, "Extras": extras, "Instruções": instrucoes})
 
 
-def predictions_excel_to_payloads(uploaded_file, user_id: str, matches: pd.DataFrame, selected_stage: str | None = None) -> tuple[pd.DataFrame, list[dict], dict, list[str]]:
-    """Lê o template importado e transforma em payloads para Supabase.
-
-    A leitura é feita linha a linha, sempre usando o match_id da própria linha.
-    Isso evita que um valor digitado em uma linha seja reaproveitado por engano
-    para outros jogos. Se houver qualquer erro, nada é salvo.
-    """
+def predictions_excel_to_payloads(uploaded_file, user_id: str, matches: pd.DataFrame) -> tuple[pd.DataFrame, list[dict], dict, list[str]]:
+    """Lê o template importado e transforma em payloads para Supabase."""
     errors: list[str] = []
     payloads: list[dict] = []
     bonus_payload: dict = {}
 
     try:
         xls = pd.ExcelFile(uploaded_file)
-        df = pd.read_excel(xls, sheet_name="Palpites", dtype={"match_id": str})
+        df = pd.read_excel(xls, sheet_name="Palpites")
     except Exception as exc:
         return pd.DataFrame(), [], {}, [f"Não consegui ler a aba Palpites do Excel: {exc}"]
 
     if df.empty:
         return df, [], {}, ["A aba Palpites está vazia."]
 
-    # Remove colunas totalmente vazias que às vezes aparecem quando o Excel é editado.
-    df = df.dropna(axis=1, how="all").copy()
-
     required = {"match_id", "Gols mandante", "Gols visitante"}
     missing_cols = required.difference(set(df.columns))
     if missing_cols:
         return df, [], {}, ["Faltam colunas no Excel: " + ", ".join(sorted(missing_cols))]
 
-    # Garante que cada linha seja tratada de forma independente.
-    df["match_id"] = df["match_id"].astype(str).str.strip()
-    df = df[df["match_id"].notna() & (df["match_id"] != "") & (df["match_id"].str.lower() != "nan")].copy()
-
-    duplicated_ids = sorted(df.loc[df["match_id"].duplicated(), "match_id"].unique().tolist())
-    if duplicated_ids:
-        errors.append("Existem match_id duplicados no Excel: " + ", ".join(duplicated_ids[:20]))
-
     matches_by_id = {}
     if not matches.empty and "match_id" in matches.columns:
         for _, match in matches.iterrows():
-            matches_by_id[str(match.get("match_id")).strip()] = match.to_dict()
-
-    def parse_excel_goal_cell(value, row_label: str, col_label: str) -> int | None:
-        """Lê uma célula de gol. Aceita só inteiros 0-20.
-
-        Valores como '2x1', '2-1', 'dois' ou negativos são erro da linha,
-        não são propagados para outros jogos.
-        """
-        if value is None or pd.isna(value):
-            return None
-
-        text = str(value).strip()
-        if text == "":
-            return None
-
-        # Excel pode ler 2.0; aceitamos quando é inteiro exato.
-        try:
-            number_float = float(text.replace(",", "."))
-            if not number_float.is_integer():
-                errors.append(f"{row_label}: {col_label} precisa ser inteiro. Valor informado: {text}")
-                return None
-            number = int(number_float)
-        except Exception:
-            errors.append(f"{row_label}: {col_label} inválido. Use só um número de 0 a 20. Valor informado: {text}")
-            return None
-
-        if number < 0 or number > 20:
-            errors.append(f"{row_label}: {col_label} fora do intervalo 0-20. Valor informado: {text}")
-            return None
-
-        return number
+            matches_by_id[str(match.get("match_id"))] = match.to_dict()
 
     preview_rows = []
 
-    for excel_idx, row in df.iterrows():
+    for _, row in df.iterrows():
         match_id = str(row.get("match_id", "")).strip()
         if not match_id:
             continue
 
         match = matches_by_id.get(match_id)
         if not match:
-            errors.append(f"Linha {excel_idx + 2}: match_id não encontrado na base: {match_id}")
+            errors.append(f"match_id não encontrado na base: {match_id}")
             continue
 
         home_team = match.get("home_team", row.get("Mandante", ""))
         away_team = match.get("away_team", row.get("Visitante", ""))
         stage = match.get("stage", row.get("Fase", ""))
-        row_label = f"Linha {excel_idx + 2} ({match_id}) — {home_team} x {away_team}"
+        label = f"{format_kickoff(match.get('kickoff_at'))} — {home_team} x {away_team}"
 
-        if selected_stage and str(stage) != str(selected_stage):
-            errors.append(f"{row_label}: este jogo pertence à fase {stage}, mas o template selecionado é {selected_stage}.")
-            preview_rows.append(
-                {
-                    "Status": "Fase diferente do template",
-                    "match_id": match_id,
-                    "Fase": stage,
-                    "Grupo": match.get("group_name", ""),
-                    "Horário": format_kickoff(match.get("kickoff_at")),
-                    "Jogo": f"{home_team} x {away_team}",
-                    "Palpite": "",
-                    "Classificado": "",
-                }
-            )
-            continue
-
-        if is_stage_locked(stage):
-            errors.append(f"{row_label}: fase travada ({stage}). Esse palpite não pode mais ser alterado por importação.")
-            preview_rows.append(
-                {
-                    "Status": "Fase travada",
-                    "match_id": match_id,
-                    "Fase": stage,
-                    "Grupo": match.get("group_name", ""),
-                    "Horário": format_kickoff(match.get("kickoff_at")),
-                    "Jogo": f"{home_team} x {away_team}",
-                    "Palpite": "",
-                    "Classificado": "",
-                }
-            )
-            continue
-
-        home_goals = parse_excel_goal_cell(row.get("Gols mandante"), row_label, "Gols mandante")
-        away_goals = parse_excel_goal_cell(row.get("Gols visitante"), row_label, "Gols visitante")
+        home_goals = parse_score_input(row.get("Gols mandante"))
+        away_goals = parse_score_input(row.get("Gols visitante"))
         selected_adv = row.get("Classificado", "") if "Classificado" in df.columns else ""
         selected_adv = "" if pd.isna(selected_adv) else str(selected_adv).strip()
 
@@ -2849,18 +2760,14 @@ def predictions_excel_to_payloads(uploaded_file, user_id: str, matches: pd.DataF
         final_adv = None
 
         if home_goals is None or away_goals is None:
-            status = "Faltam gols ou há valor inválido"
-            # Só adiciona mensagem genérica se a célula está vazia; valores inválidos já foram detalhados acima.
-            if (row.get("Gols mandante") is None or pd.isna(row.get("Gols mandante")) or str(row.get("Gols mandante")).strip() == "") or (
-                row.get("Gols visitante") is None or pd.isna(row.get("Gols visitante")) or str(row.get("Gols visitante")).strip() == ""
-            ):
-                errors.append(f"{row_label}: preencha Gols mandante e Gols visitante.")
+            status = "Faltam gols"
+            errors.append(label)
         else:
             if is_knockout_stage(stage):
                 final_adv = infer_advancing_team(home_team, away_team, home_goals, away_goals, selected_adv)
                 if not final_adv:
                     status = "Falta classificado"
-                    errors.append(f"{row_label}: empate em mata-mata exige Classificado.")
+                    errors.append(label + " — escolha classificado")
 
         preview_rows.append(
             {
@@ -2908,36 +2815,15 @@ def predictions_excel_to_payloads(uploaded_file, user_id: str, matches: pd.DataF
     preview = pd.DataFrame(preview_rows)
     return preview, payloads, bonus_payload, errors
 
+
 def render_excel_template_import_page(user_id: str, username: str, supabase, matches: pd.DataFrame):
     st.markdown("### Template em Excel")
-    st.caption(
-        "Baixe e importe um template de uma fase por vez. "
-        "Fases já travadas não aparecem para download e também são bloqueadas na importação."
-    )
-
-    if matches.empty or "stage" not in matches.columns:
-        st.warning("Nenhuma fase encontrada na tabela de jogos.")
-        return
-
-    all_stages = sort_matches_for_display(matches)["stage"].dropna().drop_duplicates().tolist()
-    stage_options = [stage for stage in all_stages if not is_stage_locked(stage)]
-
-    if not stage_options:
-        st.warning("Não há fases abertas para baixar/importar template neste momento.")
-        return
-
-    selected_template_stage = st.selectbox(
-        "Template para qual fase aberta?",
-        stage_options,
-        key="template_stage_selector",
-    )
-
-    stage_slug = re.sub(r"[^A-Za-z0-9]+", "_", selected_template_stage).strip("_").lower() or "todos"
+    st.caption("Baixe o template, preencha fora do app e importe de volta. Essa é a forma mais rápida para preencher muitos jogos de uma vez.")
 
     st.download_button(
-        "Baixar template selecionado",
-        data=build_user_template_excel(user_id, selected_template_stage),
-        file_name=f"kapitalo_cup_template_{username}_{stage_slug}.xlsx",
+        "Baixar template dos meus palpites",
+        data=build_user_template_excel(user_id),
+        file_name=f"kapitalo_cup_template_{username}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,
         key="download_prediction_template",
@@ -2953,7 +2839,7 @@ def render_excel_template_import_page(user_id: str, username: str, supabase, mat
         st.info("Depois de preencher o arquivo, importe aqui para conferir antes de salvar.")
         return
 
-    preview, payloads, bonus_payload, errors = predictions_excel_to_payloads(uploaded, user_id, matches, selected_template_stage)
+    preview, payloads, bonus_payload, errors = predictions_excel_to_payloads(uploaded, user_id, matches)
 
     st.markdown("#### Conferência da importação")
     if preview.empty:
@@ -2973,16 +2859,6 @@ def render_excel_template_import_page(user_id: str, username: str, supabase, mat
     if st.button("Salvar importação no app", use_container_width=True, key="save_prediction_template_import"):
         try:
             if payloads:
-                # Guarda extra: antes de salvar, confere novamente se nenhum jogo pertence a fase travada.
-                payload_match_ids = {str(item.get("match_id")) for item in payloads}
-                locked_payloads = []
-                for _, mrow in matches[matches["match_id"].astype(str).isin(payload_match_ids)].iterrows():
-                    if is_stage_locked(mrow.get("stage", "")):
-                        locked_payloads.append(f"{mrow.get('home_team', '')} x {mrow.get('away_team', '')} ({mrow.get('stage', '')})")
-                if locked_payloads:
-                    st.error("Importação bloqueada: existem jogos de fase travada no arquivo. Nada foi salvo.")
-                    st.dataframe(pd.DataFrame({"Jogos travados": locked_payloads}), use_container_width=True, hide_index=True)
-                    return
                 supabase.table("predictions").upsert(payloads, on_conflict="user_id,match_id").execute()
             if bonus_payload:
                 supabase.table("bonus_predictions").upsert(bonus_payload, on_conflict="user_id").execute()
@@ -3096,28 +2972,33 @@ def render_grouped_group_predictions(
     if is_groups and "group_name" in stage_matches.columns and stage_matches["group_name"].notna().any():
         blocks = sorted(stage_matches["group_name"].dropna().unique().tolist())
         unit_label = "grupos"
+        default_per_page = 2
     else:
         blocks = [f"Jogos {i + 1}-{min(i + 4, len(stage_matches))}" for i in range(0, len(stage_matches), 4)]
         unit_label = "blocos de jogos"
+        default_per_page = 2
 
-    # Para deixar a tela mais simples e rápida, mostramos sempre 4 grupos/blocos por página.
-    blocks_per_page = 4
+    c1, c2 = st.columns(2)
+    with c1:
+        blocks_per_page = st.selectbox(
+            f"Quantos {unit_label} por view?",
+            [1, 2, 3, 4],
+            index=1 if default_per_page == 2 else 0,
+            key=f"grouped_blocks_per_page_{selected_stage}",
+        )
     total_pages = max(1, (len(blocks) + blocks_per_page - 1) // blocks_per_page)
-
-    if total_pages > 1:
+    with c2:
         page_number = st.selectbox(
             "Página",
             list(range(1, total_pages + 1)),
             format_func=lambda x: f"Página {x} de {total_pages}",
             key=f"grouped_page_number_{selected_stage}",
         )
-    else:
-        page_number = 1
-
-    st.caption(f"Mostrando até 4 {unit_label} por página, em duas colunas.")
 
     start_idx = (page_number - 1) * blocks_per_page
     visible_blocks = blocks[start_idx:start_idx + blocks_per_page]
+
+    st.caption("A visualização usa duas colunas para deixar o preenchimento mais rápido.")
 
     invalid_rows: list[str] = []
     payload_rows: list[dict] = []
@@ -3272,7 +3153,9 @@ def render_grouped_group_predictions(
         )
 
     if all_group_preview:
-        st.markdown("### Classificação simulada")
+        refreshed_at = st.session_state.get("grouped_preview_refreshed_at")
+        title_suffix = f" · atualizada em {refreshed_at}" if refreshed_at else ""
+        st.markdown(f"### Classificação simulada{title_suffix}")
         st.caption("Use o botão ↻ Atualizar tabela para recalcular a simulação com os placares digitados sem salvar no banco.")
         preview_cols = st.columns(2)
         for i, (group_name, preview_table) in enumerate(all_group_preview):
@@ -3390,6 +3273,10 @@ def render_card_group_predictions(
                 invalid_rows,
                 f"Todos os palpites de {save_scope_label} foram salvos.",
             )
+
+    if is_group_stage(selected_stage):
+        with st.expander("Campeão e artilheiro", expanded=True):
+            render_bonus_predictions_section(user_id, teams, supabase)
 
     if selected_group:
         st.markdown(f"### Grupo {selected_group}")
@@ -3579,7 +3466,7 @@ def render_match_predictions_page():
     )
 
     with st.expander("Campeão e artilheiro", expanded=True):
-        render_bonus_predictions_section(user_id, teams, supabase, key_suffix="top")
+        render_bonus_predictions_section(user_id, teams, supabase)
 
     main_tab_app, main_tab_excel, main_tab_overview = st.tabs(
         ["Preencher no app", "Excel template", "Conferência geral"]
