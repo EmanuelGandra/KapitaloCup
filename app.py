@@ -286,18 +286,9 @@ st.markdown(
         margin: 0;
     }}
 
-    div[data-testid="stNumberInput"] {{
-        max-width: 150px;
-    }}
-
     div[data-testid="stNumberInput"] input {{
         text-align: center;
         font-weight: 900;
-        min-height: 38px !important;
-    }}
-
-    div[data-testid="stButton"] button {{
-        min-height: 38px !important;
     }}
 
     div[data-testid="stDataFrame"] {{
@@ -454,24 +445,16 @@ def save_prediction_payloads_or_show_errors(
     payload_rows: list[dict],
     invalid_rows: list[str],
     success_message: str,
-) -> bool:
-    """Salva vários palpites ou mostra exatamente o que falta preencher.
-
-    Importante: quando há erro de validação, a página continua renderizando.
-    Isso evita a sensação de que os palpites já digitados foram apagados.
-    """
+):
+    """Salva vários palpites ou mostra exatamente o que falta preencher."""
     if invalid_rows:
         st.error("Não foi possível salvar todos os palpites. Revise estes jogos:")
-        st.dataframe(
-            pd.DataFrame({"Jogos para revisar": invalid_rows}),
-            use_container_width=True,
-            hide_index=True,
-        )
-        return False
+        st.write(pd.DataFrame({"Jogos para revisar": invalid_rows}))
+        st.stop()
 
     if not payload_rows:
         st.warning("Não há jogos para salvar nesta tela.")
-        return False
+        st.stop()
 
     try:
         supabase.table("predictions").upsert(
@@ -482,11 +465,9 @@ def save_prediction_payloads_or_show_errors(
         clear_data_cache()
         st.success(success_message)
         st.rerun()
-        return True
 
     except Exception as exc:
         st.error(f"Erro ao salvar todos os palpites: {exc}")
-        return False
 
 
 def stage_points_for_match(stage: str) -> dict:
@@ -1114,14 +1095,6 @@ def build_missing_items_for_user(user_id: str) -> tuple[pd.DataFrame, pd.DataFra
 
 
 def simulate_group_table(group_matches: pd.DataFrame, user_predictions: pd.DataFrame) -> pd.DataFrame:
-    """Simula a classificação do grupo sempre com todos os times.
-
-    Mesmo quando ainda existem jogos sem palpite, a tabela aparece completa,
-    com os times zerados até que os resultados sejam preenchidos.
-    """
-    if group_matches is None or group_matches.empty:
-        return pd.DataFrame(columns=["Pos", "Seleção", "J", "V", "E", "D", "GP", "GC", "SG", "Pts"])
-
     teams = sorted(
         set(group_matches["home_team"].dropna().tolist()).union(
             set(group_matches["away_team"].dropna().tolist())
@@ -1143,119 +1116,51 @@ def simulate_group_table(group_matches: pd.DataFrame, user_predictions: pd.DataF
         for team in teams
     }
 
-    if user_predictions is not None and not user_predictions.empty:
-        needed_cols = {"match_id", "home_goals", "away_goals"}
-        if needed_cols.issubset(set(user_predictions.columns)):
-            merged = group_matches.merge(
-                user_predictions[["match_id", "home_goals", "away_goals"]],
-                on="match_id",
-                how="left",
-            )
-            merged = merged.dropna(subset=["home_goals", "away_goals"])
+    if user_predictions.empty:
+        return pd.DataFrame(table.values()).sort_values(["Pts", "SG", "GP"], ascending=[False, False, False])
 
-            for _, row in merged.iterrows():
-                home = row["home_team"]
-                away = row["away_team"]
-                hg = safe_int(row["home_goals"])
-                ag = safe_int(row["away_goals"])
+    merged = group_matches.merge(
+        user_predictions[["match_id", "home_goals", "away_goals"]],
+        on="match_id",
+        how="left",
+    )
 
-                table[home]["J"] += 1
-                table[away]["J"] += 1
-                table[home]["GP"] += hg
-                table[home]["GC"] += ag
-                table[away]["GP"] += ag
-                table[away]["GC"] += hg
+    merged = merged.dropna(subset=["home_goals", "away_goals"])
 
-                if hg > ag:
-                    table[home]["V"] += 1
-                    table[away]["D"] += 1
-                    table[home]["Pts"] += 3
-                elif hg < ag:
-                    table[away]["V"] += 1
-                    table[home]["D"] += 1
-                    table[away]["Pts"] += 3
-                else:
-                    table[home]["E"] += 1
-                    table[away]["E"] += 1
-                    table[home]["Pts"] += 1
-                    table[away]["Pts"] += 1
+    for _, row in merged.iterrows():
+        home = row["home_team"]
+        away = row["away_team"]
+        hg = safe_int(row["home_goals"])
+        ag = safe_int(row["away_goals"])
+
+        table[home]["J"] += 1
+        table[away]["J"] += 1
+        table[home]["GP"] += hg
+        table[home]["GC"] += ag
+        table[away]["GP"] += ag
+        table[away]["GC"] += hg
+
+        if hg > ag:
+            table[home]["V"] += 1
+            table[away]["D"] += 1
+            table[home]["Pts"] += 3
+        elif hg < ag:
+            table[away]["V"] += 1
+            table[home]["D"] += 1
+            table[away]["Pts"] += 3
+        else:
+            table[home]["E"] += 1
+            table[away]["E"] += 1
+            table[home]["Pts"] += 1
+            table[away]["Pts"] += 1
 
     df = pd.DataFrame(table.values())
-    if df.empty:
-        return pd.DataFrame(columns=["Pos", "Seleção", "J", "V", "E", "D", "GP", "GC", "SG", "Pts"])
-
     df["SG"] = df["GP"] - df["GC"]
-    df = df.sort_values(
-        ["Pts", "SG", "GP", "Seleção"],
-        ascending=[False, False, False, True],
-    ).reset_index(drop=True)
+    df = df.sort_values(["Pts", "SG", "GP", "Seleção"], ascending=[
+                        False, False, False, True]).reset_index(drop=True)
     df.insert(0, "Pos", df.index + 1)
 
     return df
-
-
-def compact_group_table(df: pd.DataFrame) -> pd.DataFrame:
-    """Tabela simulada menor para exibir no modo agrupado."""
-    wanted_cols = ["Pos", "Seleção", "J", "V", "E", "D", "SG", "Pts"]
-
-    if df is None or df.empty:
-        return pd.DataFrame(columns=wanted_cols)
-
-    out = df.copy()
-    out = out.drop(columns=["GP", "GC"], errors="ignore")
-
-    for col in wanted_cols:
-        if col not in out.columns:
-            out[col] = 0 if col not in {"Seleção"} else ""
-
-    return out[wanted_cols]
-
-
-def parse_score_input(value) -> int | None:
-    """Converte o texto do input de gols para int ou None se estiver vazio/inválido."""
-    if value is None:
-        return None
-
-    text = str(value).strip()
-    if text == "":
-        return None
-
-    if not text.isdigit():
-        return None
-
-    number = int(text)
-    if number < 0 or number > 20:
-        return None
-
-    return number
-
-
-def group_table_from_widget_keys(group_matches: pd.DataFrame, match_ids: list[str]) -> pd.DataFrame:
-    """Simula o grupo lendo diretamente os valores atuais dos widgets.
-
-    Como os inputs ficam fora de st.form, a tabela é recalculada a cada edição
-    e fica completa com todos os times do grupo.
-    """
-    pred_rows = []
-
-    for match_id in match_ids:
-        home_value = parse_score_input(
-            st.session_state.get(f"grouped_home_{match_id}"))
-        away_value = parse_score_input(
-            st.session_state.get(f"grouped_away_{match_id}"))
-
-        if home_value is None or away_value is None:
-            continue
-
-        pred_rows.append(
-            {
-                "match_id": match_id,
-                "home_goals": home_value,
-                "away_goals": away_value,
-            }
-        )
-
-    return compact_group_table(simulate_group_table(group_matches, pd.DataFrame(pred_rows)))
 
 
 # ============================================================
@@ -1602,98 +1507,6 @@ def build_ranking_chat_text() -> str:
     )
 
 
-def build_pending_predictions_summary_table() -> pd.DataFrame:
-    """Tabela com quantos jogos faltam para cada usuário completar."""
-    profiles = load_table("profiles")
-    matches = load_table("matches", order_by="match_no")
-    predictions = load_table("predictions")
-
-    total_matches = len(matches) if not matches.empty else 0
-
-    if profiles.empty:
-        return pd.DataFrame(columns=["Usuário", "Jogos preenchidos", "Jogos pendentes", "Total de jogos", "Status"])
-
-    rows = []
-    for _, user in profiles.sort_values("username").iterrows():
-        user_id = user.get("id")
-        username = user.get("username", "")
-
-        if not predictions.empty and {"user_id", "match_id"}.issubset(predictions.columns):
-            filled = predictions[predictions["user_id"] ==
-                                 user_id]["match_id"].astype(str).nunique()
-        else:
-            filled = 0
-
-        pending = max(total_matches - int(filled), 0)
-        rows.append(
-            {
-                "Usuário": username,
-                "Jogos preenchidos": int(filled),
-                "Jogos pendentes": pending,
-                "Total de jogos": total_matches,
-                "Status": "Completo" if pending == 0 and total_matches > 0 else "Pendente",
-            }
-        )
-
-    out = pd.DataFrame(rows)
-    if out.empty:
-        return out
-
-    return out.sort_values(["Jogos pendentes", "Usuário"], ascending=[False, True]).reset_index(drop=True)
-
-
-def build_bonus_predictions_all_users_table() -> pd.DataFrame:
-    """Tabela com campeão e artilheiro escolhidos por todos os usuários."""
-    profiles = load_table("profiles")
-    bonus_predictions = load_table("bonus_predictions")
-
-    if profiles.empty:
-        return pd.DataFrame(columns=["Usuário", "Campeão", "Artilheiro", "Status"])
-
-    rows = []
-    for _, user in profiles.sort_values("username").iterrows():
-        user_id = user.get("id")
-        username = user.get("username", "")
-        champion = ""
-        top_scorer = ""
-        updated_at = ""
-
-        if not bonus_predictions.empty and "user_id" in bonus_predictions.columns:
-            row = bonus_predictions[bonus_predictions["user_id"] == user_id]
-            if not row.empty:
-                champion = row.iloc[0].get("champion") or ""
-                top_scorer = row.iloc[0].get("top_scorer") or ""
-                updated_at = row.iloc[0].get("updated_at") or ""
-
-        rows.append(
-            {
-                "Usuário": username,
-                "Campeão": champion if str(champion).strip() else "Pendente",
-                "Artilheiro": top_scorer if str(top_scorer).strip() else "Pendente",
-                "Atualizado em": format_kickoff(updated_at) if updated_at else "",
-                "Status": "Completo" if str(champion).strip() and str(top_scorer).strip() else "Pendente",
-            }
-        )
-
-    return pd.DataFrame(rows).reset_index(drop=True)
-
-
-def build_pending_chat_text() -> str:
-    return (
-        "🏆 Kapitalo Cup\n\n"
-        "Pendências de palpites por participante.\n\n"
-        "Segue a lista com quantos jogos ainda faltam para cada pessoa completar."
-    )
-
-
-def build_bonus_predictions_chat_text() -> str:
-    return (
-        "🏆 Kapitalo Cup\n\n"
-        "Campeões e artilheiros escolhidos pelos participantes.\n\n"
-        "Segue o consolidado dos extras cadastrados."
-    )
-
-
 def render_google_chat_admin_page(matches: pd.DataFrame):
     st.markdown("### Google Chat")
     st.caption(
@@ -1716,8 +1529,8 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
         st.warning("Nenhum jogo encontrado.")
         return
 
-    tab_match_chat, tab_ranking_chat, tab_pending_chat, tab_bonus_chat = st.tabs(
-        ["Palpites por jogo", "Ranking atualizado", "Pendências", "Campeões e artilheiros"])
+    tab_match_chat, tab_ranking_chat = st.tabs(
+        ["Palpites por jogo", "Ranking atualizado"])
 
     with tab_match_chat:
         st.markdown("#### Enviar palpites de um jogo")
@@ -1845,66 +1658,6 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
                 st.success("Ranking enviado para o Google Chat.")
             except Exception as exc:
                 st.error(f"Erro ao enviar ranking para Google Chat: {exc}")
-
-    with tab_pending_chat:
-        st.markdown("#### Enviar pendências por participante")
-
-        pending_view = build_pending_predictions_summary_table()
-        st.markdown("##### Prévia das pendências")
-        st.dataframe(pending_view, use_container_width=True,
-                     hide_index=True, height=420)
-
-        chat_text = build_pending_chat_text()
-        with st.expander("Prévia da mensagem"):
-            st.text(chat_text)
-
-        if st.button(
-            "Enviar pendências para Google Chat",
-            key="send_pending_chat",
-            use_container_width=True,
-            disabled=not config_ok or pending_view.empty,
-        ):
-            try:
-                image_path = dataframe_to_png(
-                    pending_view,
-                    title="Pendências Kapitalo Cup",
-                    subtitle=datetime.now().strftime("Atualizado em %d/%m/%Y %H:%M"),
-                )
-                send_google_chat_image(chat_text, image_path)
-                st.success("Pendências enviadas para o Google Chat.")
-            except Exception as exc:
-                st.error(f"Erro ao enviar pendências para Google Chat: {exc}")
-
-    with tab_bonus_chat:
-        st.markdown("#### Enviar campeões e artilheiros")
-
-        bonus_view = build_bonus_predictions_all_users_table()
-        st.markdown("##### Prévia dos extras")
-        st.dataframe(bonus_view, use_container_width=True,
-                     hide_index=True, height=420)
-
-        chat_text = build_bonus_predictions_chat_text()
-        with st.expander("Prévia da mensagem"):
-            st.text(chat_text)
-
-        if st.button(
-            "Enviar campeões e artilheiros para Google Chat",
-            key="send_bonus_predictions_chat",
-            use_container_width=True,
-            disabled=not config_ok or bonus_view.empty,
-        ):
-            try:
-                image_path = dataframe_to_png(
-                    bonus_view,
-                    title="Campeões e artilheiros",
-                    subtitle=datetime.now().strftime("Atualizado em %d/%m/%Y %H:%M"),
-                )
-                send_google_chat_image(chat_text, image_path)
-                st.success(
-                    "Campeões e artilheiros enviados para o Google Chat.")
-            except Exception as exc:
-                st.error(
-                    f"Erro ao enviar campeões e artilheiros para Google Chat: {exc}")
 
 
 # ============================================================
@@ -2470,7 +2223,7 @@ def render_ranking():
 # ============================================================
 
 
-def render_bonus_predictions_section(user_id: str, teams: list[str], supabase, key_suffix: str = "main"):
+def render_bonus_predictions_section(user_id: str, teams: list[str], supabase):
     """Escolha de campeão e artilheiro dentro da tela de palpites da fase de grupos."""
     st.markdown("### Extras antes da Copa")
     render_stage_lock_message("extras", label="Extras — campeão e artilheiro")
@@ -2502,7 +2255,7 @@ def render_bonus_predictions_section(user_id: str, teams: list[str], supabase, k
             "Campeão",
             champion_options,
             index=champion_index,
-            key=f"bonus_champion_inline_{key_suffix}",
+            key="bonus_champion_inline",
             disabled=extras_locked,
         )
 
@@ -2510,7 +2263,7 @@ def render_bonus_predictions_section(user_id: str, teams: list[str], supabase, k
         top_scorer = st.text_input(
             "Artilheiro",
             value=default_top_scorer,
-            key=f"bonus_top_scorer_inline_{key_suffix}",
+            key="bonus_top_scorer_inline",
             disabled=extras_locked,
         )
 
@@ -2518,7 +2271,7 @@ def render_bonus_predictions_section(user_id: str, teams: list[str], supabase, k
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button(
             "Salvar extras",
-            key=f"save_bonus_inline_{key_suffix}",
+            key="save_bonus_inline",
             use_container_width=True,
             disabled=extras_locked,
         ):
@@ -2549,871 +2302,44 @@ def render_bonus_predictions_section(user_id: str, teams: list[str], supabase, k
     st.caption("Campeão e artilheiro valem 100 pontos cada. Eles ficam disponíveis na fase de grupos e travam no prazo de extras.")
 
 
-def make_group_editor_df(group_matches: pd.DataFrame, user_predictions: pd.DataFrame) -> pd.DataFrame:
-    """Monta a tabela editável de um grupo com valores salvos como default."""
-    rows = []
+def render_match_predictions_page():
+    if not st.session_state.get("is_logged_in", False):
+        st.warning("Você precisa fazer login para registrar palpites.")
+        return
 
-    for _, match in sort_matches_for_display(group_matches).iterrows():
-        match_id = match.get("match_id", "")
-        existing = pd.DataFrame()
-
-        if not user_predictions.empty and "match_id" in user_predictions.columns:
-            existing = user_predictions[user_predictions["match_id"].astype(
-                str) == str(match_id)]
-
-        home_goals = None
-        away_goals = None
-
-        if not existing.empty:
-            home_goals = safe_int(
-                existing.iloc[0].get("home_goals"), default=None)
-            away_goals = safe_int(
-                existing.iloc[0].get("away_goals"), default=None)
-
-        rows.append(
-            {
-                "match_id": match_id,
-                "Horário": format_kickoff(match.get("kickoff_at")),
-                "Mandante": match.get("home_team", ""),
-                "Gols mandante": home_goals,
-                "Gols visitante": away_goals,
-                "Visitante": match.get("away_team", ""),
-            }
-        )
-
-    return pd.DataFrame(rows)
-
-
-def editor_df_to_prediction_payloads(editor_df: pd.DataFrame, user_id: str, stage: str) -> tuple[list[str], list[dict]]:
-    """Converte a tabela editável em payloads. Não salva nada quando há linha incompleta."""
-    invalid_rows = []
-    payload_rows = []
-
-    if editor_df is None or editor_df.empty:
-        return ["Nenhum jogo encontrado nesta tela."], []
-
-    for _, row in editor_df.iterrows():
-        match_id = row.get("match_id")
-        home_team = row.get("Mandante", "")
-        away_team = row.get("Visitante", "")
-        label = f"{row.get('Horário', '')} — {home_team} x {away_team}"
-        home_value = row.get("Gols mandante")
-        away_value = row.get("Gols visitante")
-
-        if pd.isna(home_value) or pd.isna(away_value) or home_value is None or away_value is None:
-            invalid_rows.append(label)
-            continue
-
-        try:
-            home_int = int(home_value)
-            away_int = int(away_value)
-        except Exception:
-            invalid_rows.append(label)
-            continue
-
-        if home_int < 0 or away_int < 0:
-            invalid_rows.append(label)
-            continue
-
-        payload_rows.append(
-            {
-                "user_id": user_id,
-                "match_id": match_id,
-                "home_goals": home_int,
-                "away_goals": away_int,
-                "advancing_team": None if is_group_stage(stage) else infer_advancing_team(home_team, away_team, home_int, away_int, None),
-            }
-        )
-
-    return invalid_rows, payload_rows
-
-
-def group_table_from_editor(group_matches: pd.DataFrame, editor_df: pd.DataFrame) -> pd.DataFrame:
-    """Simula a tabela do grupo usando o que está no editor, mesmo antes de salvar."""
-    if editor_df is None or editor_df.empty:
-        return simulate_group_table(group_matches, pd.DataFrame())
-
-    pred_rows = []
-    for _, row in editor_df.iterrows():
-        hg = row.get("Gols mandante")
-        ag = row.get("Gols visitante")
-        if pd.isna(hg) or pd.isna(ag) or hg is None or ag is None:
-            continue
-        try:
-            pred_rows.append(
-                {
-                    "match_id": row.get("match_id"),
-                    "home_goals": int(hg),
-                    "away_goals": int(ag),
-                }
-            )
-        except Exception:
-            continue
-
-    return simulate_group_table(group_matches, pd.DataFrame(pred_rows))
-
-
-def compact_group_table(df: pd.DataFrame) -> pd.DataFrame:
-    """Tabela simulada menor para exibir no modo agrupado."""
-    if df is None or df.empty:
-        return pd.DataFrame(columns=["Pos", "Seleção", "J", "V", "E", "D", "SG", "Pts"])
-
-    out = df.copy()
-    out = out.drop(columns=["GP", "GC"], errors="ignore")
-
-    wanted_cols = [col for col in ["Pos", "Seleção", "J",
-                                   "V", "E", "D", "SG", "Pts"] if col in out.columns]
-    return out[wanted_cols]
-
-
-def group_table_from_input_rows(group_matches: pd.DataFrame, input_rows: list[dict]) -> pd.DataFrame:
-    """Simula a tabela do grupo usando os valores atualmente submetidos no formulário."""
-    pred_rows = []
-
-    for row in input_rows:
-        home_value = row.get("home_goals")
-        away_value = row.get("away_goals")
-
-        if home_value is None or away_value is None:
-            continue
-
-        try:
-            pred_rows.append(
-                {
-                    "match_id": row.get("match_id"),
-                    "home_goals": int(home_value),
-                    "away_goals": int(away_value),
-                }
-            )
-        except Exception:
-            continue
-
-    table = simulate_group_table(group_matches, pd.DataFrame(pred_rows))
-    return compact_group_table(table)
-
-
-def build_user_template_excel(user_id: str, selected_stage: str | None = None) -> bytes:
-    """Gera um Excel-template para o usuário preencher fora do app e importar de volta.
-
-    Quando selected_stage é informado, o template vem apenas com os jogos daquela fase.
-    Isso é melhor para fases futuras, porque o usuário baixa/preenche só o bloco que está aberto.
-    """
+    user_id = st.session_state["user_id"]
+    username = st.session_state.get("username", "")
+    supabase = get_client()
     matches = sort_matches_for_display(
         load_table("matches", order_by="match_no"))
-    predictions = load_table("predictions")
-    bonus_predictions = load_table("bonus_predictions")
 
     if matches.empty:
-        return create_excel_bytes({"Palpites": pd.DataFrame()})
-
-    if selected_stage and "stage" in matches.columns:
-        matches = matches[matches["stage"] == selected_stage].copy()
-        matches = sort_matches_for_display(matches)
-
-    if matches.empty:
-        return create_excel_bytes({"Palpites": pd.DataFrame({"Mensagem": ["Nenhum jogo encontrado para esta fase."]})})
-
-    user_predictions = pd.DataFrame()
-    if not predictions.empty and "user_id" in predictions.columns:
-        user_predictions = predictions[predictions["user_id"] == user_id].copy(
-        )
-
-    match_cols = [
-        col for col in ["match_id", "stage", "group_name", "kickoff_at", "home_team", "away_team"]
-        if col in matches.columns
-    ]
-    out = matches[match_cols].copy()
-    if not user_predictions.empty:
-        pred_cols = [col for col in ["match_id", "home_goals", "away_goals",
-                                     "advancing_team"] if col in user_predictions.columns]
-        out = out.merge(user_predictions[pred_cols], on="match_id", how="left")
-    else:
-        out["home_goals"] = ""
-        out["away_goals"] = ""
-        out["advancing_team"] = ""
-
-    out["Horário"] = out.apply(
-        lambda r: format_kickoff(r.get("kickoff_at")), axis=1)
-    out = out.rename(
-        columns={
-            "match_id": "match_id",
-            "stage": "Fase",
-            "group_name": "Grupo",
-            "home_team": "Mandante",
-            "away_team": "Visitante",
-            "home_goals": "Gols mandante",
-            "away_goals": "Gols visitante",
-            "advancing_team": "Classificado",
-        }
-    )
-
-    ordered = [
-        "match_id", "Fase", "Grupo", "Horário", "Mandante",
-        "Gols mandante", "Gols visitante", "Visitante", "Classificado",
-    ]
-    out = out[[c for c in ordered if c in out.columns]]
-
-    champion = ""
-    top_scorer = ""
-    if not bonus_predictions.empty and "user_id" in bonus_predictions.columns:
-        b = bonus_predictions[bonus_predictions["user_id"] == user_id].copy()
-        if not b.empty:
-            champion = b.iloc[0].get("champion") or ""
-            top_scorer = b.iloc[0].get("top_scorer") or ""
-
-    extras = pd.DataFrame(
-        [
-            {"Campo": "Campeão", "Valor": champion},
-            {"Campo": "Artilheiro", "Valor": top_scorer},
-        ]
-    )
-
-    instrucoes = pd.DataFrame(
-        {
-            "Instruções": [
-                "Preencha as colunas Gols mandante e Gols visitante.",
-                "Na fase de grupos, deixe Classificado vazio.",
-                "Em mata-mata, se o placar estiver empatado, preencha Classificado com Mandante ou Visitante.",
-                "Não altere a coluna match_id.",
-                "Na aba Extras, preencha Campeão e Artilheiro.",
-            ]
-        }
-    )
-
-    return create_excel_bytes({"Palpites": out, "Extras": extras, "Instruções": instrucoes})
-
-
-def predictions_excel_to_payloads(uploaded_file, user_id: str, matches: pd.DataFrame, selected_stage: str | None = None) -> tuple[pd.DataFrame, list[dict], dict, list[str]]:
-    """Lê o template importado e transforma em payloads para Supabase.
-
-    A leitura é feita linha a linha, sempre usando o match_id da própria linha.
-    Isso evita que um valor digitado em uma linha seja reaproveitado por engano
-    para outros jogos. Se houver qualquer erro, nada é salvo.
-    """
-    errors: list[str] = []
-    payloads: list[dict] = []
-    bonus_payload: dict = {}
-
-    try:
-        xls = pd.ExcelFile(uploaded_file)
-        df = pd.read_excel(xls, sheet_name="Palpites", dtype={"match_id": str})
-    except Exception as exc:
-        return pd.DataFrame(), [], {}, [f"Não consegui ler a aba Palpites do Excel: {exc}"]
-
-    if df.empty:
-        return df, [], {}, ["A aba Palpites está vazia."]
-
-    # Remove colunas totalmente vazias que às vezes aparecem quando o Excel é editado.
-    df = df.dropna(axis=1, how="all").copy()
-
-    required = {"match_id", "Gols mandante", "Gols visitante"}
-    missing_cols = required.difference(set(df.columns))
-    if missing_cols:
-        return df, [], {}, ["Faltam colunas no Excel: " + ", ".join(sorted(missing_cols))]
-
-    # Garante que cada linha seja tratada de forma independente.
-    df["match_id"] = df["match_id"].astype(str).str.strip()
-    df = df[df["match_id"].notna() & (df["match_id"] != "") & (
-        df["match_id"].str.lower() != "nan")].copy()
-
-    duplicated_ids = sorted(
-        df.loc[df["match_id"].duplicated(), "match_id"].unique().tolist())
-    if duplicated_ids:
-        errors.append("Existem match_id duplicados no Excel: " +
-                      ", ".join(duplicated_ids[:20]))
-
-    matches_by_id = {}
-    if not matches.empty and "match_id" in matches.columns:
-        for _, match in matches.iterrows():
-            matches_by_id[str(match.get("match_id")).strip()] = match.to_dict()
-
-    def parse_excel_goal_cell(value, row_label: str, col_label: str) -> int | None:
-        """Lê uma célula de gol. Aceita só inteiros 0-20.
-
-        Valores como '2x1', '2-1', 'dois' ou negativos são erro da linha,
-        não são propagados para outros jogos.
-        """
-        if value is None or pd.isna(value):
-            return None
-
-        text = str(value).strip()
-        if text == "":
-            return None
-
-        # Excel pode ler 2.0; aceitamos quando é inteiro exato.
-        try:
-            number_float = float(text.replace(",", "."))
-            if not number_float.is_integer():
-                errors.append(
-                    f"{row_label}: {col_label} precisa ser inteiro. Valor informado: {text}")
-                return None
-            number = int(number_float)
-        except Exception:
-            errors.append(
-                f"{row_label}: {col_label} inválido. Use só um número de 0 a 20. Valor informado: {text}")
-            return None
-
-        if number < 0 or number > 20:
-            errors.append(
-                f"{row_label}: {col_label} fora do intervalo 0-20. Valor informado: {text}")
-            return None
-
-        return number
-
-    preview_rows = []
-
-    for excel_idx, row in df.iterrows():
-        match_id = str(row.get("match_id", "")).strip()
-        if not match_id:
-            continue
-
-        match = matches_by_id.get(match_id)
-        if not match:
-            errors.append(
-                f"Linha {excel_idx + 2}: match_id não encontrado na base: {match_id}")
-            continue
-
-        home_team = match.get("home_team", row.get("Mandante", ""))
-        away_team = match.get("away_team", row.get("Visitante", ""))
-        stage = match.get("stage", row.get("Fase", ""))
-        row_label = f"Linha {excel_idx + 2} ({match_id}) — {home_team} x {away_team}"
-
-        if selected_stage and str(stage) != str(selected_stage):
-            errors.append(
-                f"{row_label}: este jogo pertence à fase {stage}, mas o template selecionado é {selected_stage}.")
-            preview_rows.append(
-                {
-                    "Status": "Fase diferente do template",
-                    "match_id": match_id,
-                    "Fase": stage,
-                    "Grupo": match.get("group_name", ""),
-                    "Horário": format_kickoff(match.get("kickoff_at")),
-                    "Jogo": f"{home_team} x {away_team}",
-                    "Palpite": "",
-                    "Classificado": "",
-                }
-            )
-            continue
-
-        if is_stage_locked(stage):
-            errors.append(
-                f"{row_label}: fase travada ({stage}). Esse palpite não pode mais ser alterado por importação.")
-            preview_rows.append(
-                {
-                    "Status": "Fase travada",
-                    "match_id": match_id,
-                    "Fase": stage,
-                    "Grupo": match.get("group_name", ""),
-                    "Horário": format_kickoff(match.get("kickoff_at")),
-                    "Jogo": f"{home_team} x {away_team}",
-                    "Palpite": "",
-                    "Classificado": "",
-                }
-            )
-            continue
-
-        home_goals = parse_excel_goal_cell(
-            row.get("Gols mandante"), row_label, "Gols mandante")
-        away_goals = parse_excel_goal_cell(
-            row.get("Gols visitante"), row_label, "Gols visitante")
-        selected_adv = row.get(
-            "Classificado", "") if "Classificado" in df.columns else ""
-        selected_adv = "" if pd.isna(
-            selected_adv) else str(selected_adv).strip()
-
-        status = "OK"
-        final_adv = None
-
-        if home_goals is None or away_goals is None:
-            status = "Faltam gols ou há valor inválido"
-            # Só adiciona mensagem genérica se a célula está vazia; valores inválidos já foram detalhados acima.
-            if (row.get("Gols mandante") is None or pd.isna(row.get("Gols mandante")) or str(row.get("Gols mandante")).strip() == "") or (
-                row.get("Gols visitante") is None or pd.isna(
-                    row.get("Gols visitante")) or str(row.get("Gols visitante")).strip() == ""
-            ):
-                errors.append(
-                    f"{row_label}: preencha Gols mandante e Gols visitante.")
-        else:
-            if is_knockout_stage(stage):
-                final_adv = infer_advancing_team(
-                    home_team, away_team, home_goals, away_goals, selected_adv)
-                if not final_adv:
-                    status = "Falta classificado"
-                    errors.append(
-                        f"{row_label}: empate em mata-mata exige Classificado.")
-
-        preview_rows.append(
-            {
-                "Status": status,
-                "match_id": match_id,
-                "Fase": stage,
-                "Grupo": match.get("group_name", ""),
-                "Horário": format_kickoff(match.get("kickoff_at")),
-                "Jogo": f"{home_team} x {away_team}",
-                "Palpite": "" if home_goals is None or away_goals is None else f"{home_goals} x {away_goals}",
-                "Classificado": final_adv or selected_adv,
-            }
-        )
-
-        if status == "OK":
-            payloads.append(
-                {
-                    "user_id": user_id,
-                    "match_id": match_id,
-                    "home_goals": int(home_goals),
-                    "away_goals": int(away_goals),
-                    "advancing_team": final_adv,
-                }
-            )
-
-    try:
-        if "Extras" in xls.sheet_names:
-            extras = pd.read_excel(xls, sheet_name="Extras")
-            if {"Campo", "Valor"}.issubset(extras.columns):
-                extra_map = {
-                    norm_text(row.get("Campo")): "" if pd.isna(row.get("Valor")) else str(row.get("Valor")).strip()
-                    for _, row in extras.iterrows()
-                }
-                champion = extra_map.get(
-                    "campeão") or extra_map.get("campeao") or ""
-                top_scorer = extra_map.get("artilheiro") or ""
-                if champion or top_scorer:
-                    bonus_payload = {
-                        "user_id": user_id,
-                        "champion": champion or None,
-                        "top_scorer": top_scorer or None,
-                    }
-    except Exception:
-        pass
-
-    preview = pd.DataFrame(preview_rows)
-    return preview, payloads, bonus_payload, errors
-
-
-def render_excel_template_import_page(user_id: str, username: str, supabase, matches: pd.DataFrame):
-    st.markdown("### Template em Excel")
-    st.caption(
-        "Baixe e importe um template de uma fase por vez. "
-        "Fases já travadas não aparecem para download e também são bloqueadas na importação."
-    )
-
-    if matches.empty or "stage" not in matches.columns:
-        st.warning("Nenhuma fase encontrada na tabela de jogos.")
-        return
-
-    all_stages = sort_matches_for_display(
-        matches)["stage"].dropna().drop_duplicates().tolist()
-    stage_options = [
-        stage for stage in all_stages if not is_stage_locked(stage)]
-
-    if not stage_options:
         st.warning(
-            "Não há fases abertas para baixar/importar template neste momento.")
+            "Nenhum jogo encontrado. Rode o seed com `python -m src.seed`.")
         return
 
-    selected_template_stage = st.selectbox(
-        "Template para qual fase aberta?",
-        stage_options,
-        key="template_stage_selector",
-    )
-
-    stage_slug = re.sub(r"[^A-Za-z0-9]+", "_",
-                        selected_template_stage).strip("_").lower() or "todos"
-
-    st.download_button(
-        "Baixar template selecionado",
-        data=build_user_template_excel(user_id, selected_template_stage),
-        file_name=f"kapitalo_cup_template_{username}_{stage_slug}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True,
-        key="download_prediction_template",
-    )
-
-    uploaded = st.file_uploader(
-        "Importar template preenchido",
-        type=["xlsx"],
-        key="upload_prediction_template",
-    )
-
-    if uploaded is None:
-        st.info(
-            "Depois de preencher o arquivo, importe aqui para conferir antes de salvar.")
-        return
-
-    preview, payloads, bonus_payload, errors = predictions_excel_to_payloads(
-        uploaded, user_id, matches, selected_template_stage)
-
-    st.markdown("#### Conferência da importação")
-    if preview.empty:
-        st.warning("Não encontrei jogos válidos no arquivo importado.")
-    else:
-        st.dataframe(preview, use_container_width=True,
-                     hide_index=True, height=460)
-
-    if errors:
-        st.error("Existem linhas para revisar. Nada será salvo enquanto houver erro.")
-        st.dataframe(pd.DataFrame({"Revisar": errors}),
-                     use_container_width=True, hide_index=True)
-        return
-
-    st.success(
-        f"Arquivo validado: {len(payloads)} palpites prontos para salvar.")
-    if bonus_payload:
-        st.info("O arquivo também contém campeão/artilheiro para salvar.")
-
-    if st.button("Salvar importação no app", use_container_width=True, key="save_prediction_template_import"):
-        try:
-            if payloads:
-                # Guarda extra: antes de salvar, confere novamente se nenhum jogo pertence a fase travada.
-                payload_match_ids = {str(item.get("match_id"))
-                                     for item in payloads}
-                locked_payloads = []
-                for _, mrow in matches[matches["match_id"].astype(str).isin(payload_match_ids)].iterrows():
-                    if is_stage_locked(mrow.get("stage", "")):
-                        locked_payloads.append(
-                            f"{mrow.get('home_team', '')} x {mrow.get('away_team', '')} ({mrow.get('stage', '')})")
-                if locked_payloads:
-                    st.error(
-                        "Importação bloqueada: existem jogos de fase travada no arquivo. Nada foi salvo.")
-                    st.dataframe(pd.DataFrame(
-                        {"Jogos travados": locked_payloads}), use_container_width=True, hide_index=True)
-                    return
-                supabase.table("predictions").upsert(
-                    payloads, on_conflict="user_id,match_id").execute()
-            if bonus_payload:
-                supabase.table("bonus_predictions").upsert(
-                    bonus_payload, on_conflict="user_id").execute()
-            clear_data_cache()
-            st.success("Importação salva com sucesso.")
-            st.rerun()
-        except Exception as exc:
-            st.error(f"Erro ao salvar importação: {exc}")
-
-
-def build_user_predictions_overview(user_id: str, matches: pd.DataFrame) -> pd.DataFrame:
+    teams = get_all_teams(matches)
     predictions = load_table("predictions")
-    bonus_predictions = load_table("bonus_predictions")
 
-    user_predictions = pd.DataFrame()
     if not predictions.empty and "user_id" in predictions.columns:
         user_predictions = predictions[predictions["user_id"] == user_id].copy(
         )
-
-    out = matches.copy()
-    if not user_predictions.empty:
-        cols = [c for c in ["match_id", "home_goals", "away_goals",
-                            "advancing_team", "updated_at"] if c in user_predictions.columns]
-        out = out.merge(user_predictions[cols], on="match_id", how="left")
     else:
-        out["home_goals"] = pd.NA
-        out["away_goals"] = pd.NA
-        out["advancing_team"] = ""
-
-    rows = []
-    for _, row in sort_matches_for_display(out).iterrows():
-        hg = row.get("home_goals")
-        ag = row.get("away_goals")
-        filled = not (pd.isna(hg) or pd.isna(ag))
-        rows.append(
-            {
-                "Status": "Salvo" if filled else "Pendente",
-                "Fase": row.get("stage", ""),
-                "Grupo": row.get("group_name", ""),
-                "Horário": format_kickoff(row.get("kickoff_at")),
-                "Jogo": f"{row.get('home_team', '')} x {row.get('away_team', '')}",
-                "Palpite": "" if not filled else f"{safe_int(hg)} x {safe_int(ag)}",
-                "Classificado": row.get("advancing_team") or "",
-            }
-        )
-
-    overview = pd.DataFrame(rows)
-
-    champion = ""
-    top_scorer = ""
-    if not bonus_predictions.empty and "user_id" in bonus_predictions.columns:
-        b = bonus_predictions[bonus_predictions["user_id"] == user_id].copy()
-        if not b.empty:
-            champion = b.iloc[0].get("champion") or ""
-            top_scorer = b.iloc[0].get("top_scorer") or ""
-
-    return overview, champion, top_scorer
-
-
-def render_predictions_overview_page(user_id: str, matches: pd.DataFrame):
-    st.markdown("### Conferência geral dos meus palpites")
-    overview, champion, top_scorer = build_user_predictions_overview(
-        user_id, matches)
-
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        metric_box(
-            "Jogos salvos", f"{int((overview['Status'] == 'Salvo').sum())}/{len(overview)}" if not overview.empty else "0/0")
-    with c2:
-        metric_box("Campeão", champion or "Pendente")
-    with c3:
-        metric_box("Artilheiro", top_scorer or "Pendente")
-
-    status_filter = st.radio("Filtro", [
-                             "Todos", "Pendentes", "Salvos"], horizontal=True, key="overview_status_filter")
-    view = overview.copy()
-    if status_filter == "Pendentes":
-        view = view[view["Status"] == "Pendente"]
-    elif status_filter == "Salvos":
-        view = view[view["Status"] == "Salvo"]
-
-    st.dataframe(view, use_container_width=True, hide_index=True, height=520)
-
-
-def render_grouped_group_predictions(
-    user_id: str,
-    supabase,
-    matches: pd.DataFrame,
-    user_predictions: pd.DataFrame,
-    selected_stage: str,
-):
-    """Modo agrupado mais leve, usando st.form para evitar rerun a cada número digitado.
-
-    Funciona para grupos e para mata-mata. Em mata-mata, o classificado é automático
-    quando há vencedor; se houver empate, o usuário escolhe quem passa.
-    """
-    stage_matches = sort_matches_for_display(
-        matches[matches["stage"] == selected_stage].copy())
-    if stage_matches.empty:
-        st.info("Não há jogos nesta fase.")
-        return
-
-    is_groups = is_group_stage(selected_stage)
+        user_predictions = pd.DataFrame()
 
     st.markdown(
         """
         <div class="section-card">
-            <h3 style="margin-bottom:0.25rem;">Preenchimento agrupado rápido</h3>
+            <h3 style="margin-bottom:0.25rem;">Preencha seus palpites</h3>
             <p style="color:#6b7280;margin-bottom:0;">
-                Preencha vários jogos sem a página processar a cada número. Nada é salvo até clicar no botão de salvar.
+                Escolha a fase e preencha os placares. Em mata-mata, o classificado é definido automaticamente pelo placar.
+                Se o jogo terminar empatado, selecione quem passa.
             </p>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    if is_groups and "group_name" in stage_matches.columns and stage_matches["group_name"].notna().any():
-        blocks = sorted(stage_matches["group_name"].dropna().unique().tolist())
-        unit_label = "grupos"
-    else:
-        blocks = [
-            f"Jogos {i + 1}-{min(i + 4, len(stage_matches))}" for i in range(0, len(stage_matches), 4)]
-        unit_label = "blocos de jogos"
-
-    # Para deixar a tela mais simples e rápida, mostramos sempre 4 grupos/blocos por página.
-    blocks_per_page = 4
-    total_pages = max(
-        1, (len(blocks) + blocks_per_page - 1) // blocks_per_page)
-
-    if total_pages > 1:
-        page_number = st.selectbox(
-            "Página",
-            list(range(1, total_pages + 1)),
-            format_func=lambda x: f"Página {x} de {total_pages}",
-            key=f"grouped_page_number_{selected_stage}",
-        )
-    else:
-        page_number = 1
-
-    st.caption(f"Mostrando até 4 {unit_label} por página, em duas colunas.")
-
-    start_idx = (page_number - 1) * blocks_per_page
-    visible_blocks = blocks[start_idx:start_idx + blocks_per_page]
-
-    invalid_rows: list[str] = []
-    payload_rows: list[dict] = []
-    all_group_preview: list[tuple[str, pd.DataFrame]] = []
-    visible_match_count = 0
-
-    with st.form(key=f"grouped_predictions_form_{selected_stage}_{page_number}_{blocks_per_page}"):
-        cols = st.columns(2)
-
-        for idx, block in enumerate(visible_blocks):
-            with cols[idx % 2]:
-                if is_groups:
-                    block_matches = sort_matches_for_display(
-                        stage_matches[stage_matches["group_name"] == block].copy())
-                    st.markdown(f"### Grupo {block}")
-                else:
-                    block_start = (blocks.index(block)) * 4
-                    block_matches = stage_matches.iloc[block_start:block_start + 4].copy()
-                    st.markdown(f"### {block}")
-
-                group_match_ids: list[str] = []
-                preview_input_rows: list[dict] = []
-
-                for _, match in block_matches.iterrows():
-                    visible_match_count += 1
-                    match_id = str(match.get("match_id", ""))
-                    group_match_ids.append(match_id)
-                    home_team = match.get("home_team", "")
-                    away_team = match.get("away_team", "")
-                    kickoff_text = format_kickoff(match.get("kickoff_at"))
-                    stage = match.get("stage", selected_stage)
-
-                    existing = pd.DataFrame()
-                    if not user_predictions.empty and "match_id" in user_predictions.columns:
-                        existing = user_predictions[user_predictions["match_id"].astype(
-                            str) == match_id]
-
-                    default_home = ""
-                    default_away = ""
-                    default_adv = ""
-                    if not existing.empty:
-                        default_home = str(
-                            safe_int(existing.iloc[0].get("home_goals")))
-                        default_away = str(
-                            safe_int(existing.iloc[0].get("away_goals")))
-                        default_adv = existing.iloc[0].get(
-                            "advancing_team") or ""
-
-                    st.caption(kickoff_text)
-                    c_home, c_hg, c_x, c_ag, c_away = st.columns(
-                        [2.6, 0.75, 0.15, 0.75, 2.6])
-                    with c_home:
-                        st.markdown(
-                            f"<div style='font-weight:700;font-size:0.84rem;padding-top:0.3rem;'>{home_team}</div>", unsafe_allow_html=True)
-                    with c_hg:
-                        home_value_raw = st.text_input(
-                            f"Gols mandante {match_id}",
-                            value=default_home,
-                            key=f"fast_home_{match_id}",
-                            label_visibility="collapsed",
-                            max_chars=2,
-                            disabled=is_stage_locked(stage),
-                        )
-                    with c_x:
-                        st.markdown(
-                            "<div style='text-align:center;font-weight:900;padding-top:0.35rem;'>×</div>", unsafe_allow_html=True)
-                    with c_ag:
-                        away_value_raw = st.text_input(
-                            f"Gols visitante {match_id}",
-                            value=default_away,
-                            key=f"fast_away_{match_id}",
-                            label_visibility="collapsed",
-                            max_chars=2,
-                            disabled=is_stage_locked(stage),
-                        )
-                    with c_away:
-                        st.markdown(
-                            f"<div style='font-weight:700;font-size:0.84rem;padding-top:0.3rem;'>{away_team}</div>", unsafe_allow_html=True)
-
-                    home_value = parse_score_input(home_value_raw)
-                    away_value = parse_score_input(away_value_raw)
-                    selected_adv = ""
-
-                    if is_knockout_stage(stage):
-                        needs_adv = home_value is not None and away_value is not None and home_value == away_value
-                        if needs_adv:
-                            opts = ["", home_team, away_team]
-                            idx_adv = opts.index(
-                                default_adv) if default_adv in opts else 0
-                            selected_adv = st.selectbox(
-                                f"Classificado no empate — {home_team} x {away_team}",
-                                opts,
-                                index=idx_adv,
-                                key=f"fast_adv_{match_id}",
-                                disabled=is_stage_locked(stage),
-                            )
-                        elif home_value is not None and away_value is not None:
-                            selected_adv = infer_advancing_team(
-                                home_team, away_team, home_value, away_value, None) or ""
-                            st.caption(f"Classificado: {selected_adv}")
-                        else:
-                            selected_adv = default_adv
-
-                    label = f"{kickoff_text} — {home_team} x {away_team}"
-                    if home_value is None or away_value is None:
-                        invalid_rows.append(label)
-                    else:
-                        final_adv = None
-                        if is_knockout_stage(stage):
-                            final_adv = infer_advancing_team(
-                                home_team, away_team, home_value, away_value, selected_adv)
-                            if not final_adv:
-                                invalid_rows.append(
-                                    label + " — escolha classificado")
-                                continue
-                        payload_rows.append(
-                            {
-                                "user_id": user_id,
-                                "match_id": match_id,
-                                "home_goals": home_value,
-                                "away_goals": away_value,
-                                "advancing_team": final_adv,
-                            }
-                        )
-                        preview_input_rows.append(
-                            {"match_id": match_id, "home_goals": home_value,
-                                "away_goals": away_value}
-                        )
-
-                if is_groups:
-                    preview_table = group_table_from_input_rows(
-                        block_matches, preview_input_rows)
-                    all_group_preview.append((str(block), preview_table))
-
-        action_col1, action_col2 = st.columns([1, 2])
-
-        with action_col1:
-            refresh_preview = st.form_submit_button(
-                "↻ Atualizar tabela",
-                use_container_width=True,
-                disabled=is_stage_locked(selected_stage),
-                help="Atualiza a classificação simulada com os placares digitados, sem salvar no banco.",
-            )
-
-        with action_col2:
-            submitted = st.form_submit_button(
-                f"Salvar todos os jogos desta view ({visible_match_count} jogos)",
-                use_container_width=True,
-                disabled=is_stage_locked(selected_stage),
-            )
-
-    if refresh_preview:
-        st.session_state["grouped_preview_refreshed_at"] = datetime.now().strftime(
-            "%d/%m/%Y %H:%M:%S")
-        if invalid_rows:
-            st.info(
-                "Tabela atualizada com os placares preenchidos. Jogos ainda vazios ficam como não jogados na simulação."
-            )
-        else:
-            st.success(
-                "Tabela simulada atualizada com todos os placares desta view.")
-
-    if submitted:
-        save_prediction_payloads_or_show_errors(
-            supabase,
-            payload_rows,
-            invalid_rows,
-            "Palpites desta view salvos com sucesso.",
-        )
-
-    if all_group_preview:
-        st.markdown("### Classificação simulada")
-        st.caption(
-            "Use o botão ↻ Atualizar tabela para recalcular a simulação com os placares digitados sem salvar no banco.")
-        preview_cols = st.columns(2)
-        for i, (group_name, preview_table) in enumerate(all_group_preview):
-            with preview_cols[i % 2]:
-                st.markdown(f"**Grupo {group_name}**")
-                st.dataframe(preview_table, use_container_width=True,
-                             hide_index=True, height=180)
-
-
-def render_card_group_predictions(
-    user_id: str,
-    username: str,
-    supabase,
-    matches: pd.DataFrame,
-    user_predictions: pd.DataFrame,
-    teams: list[str],
-):
-    """Modo original simplificado: um grupo/jogo por vez com cards."""
     st.download_button(
         label="Baixar minhas previsões em Excel",
         data=build_user_prediction_export(user_id),
@@ -3494,8 +2420,8 @@ def render_card_group_predictions(
     with st.container(border=True):
         st.markdown(f"#### Salvar todos os palpites — {save_scope_label}")
         st.caption(
-            "Preencha os placares visíveis abaixo e salve tudo de uma vez. "
-            "Se algo estiver incompleto, o app só avisa o que falta e mantém a tela aberta."
+            "Preencha todos os placares visíveis abaixo e use este botão para salvar tudo de uma vez. "
+            "Se algum jogo estiver incompleto, o app vai listar exatamente o que falta."
         )
 
         if st.button(
@@ -3508,7 +2434,7 @@ def render_card_group_predictions(
                 st.error(
                     f"Não é possível alterar estes jogos. O prazo de {selected_stage} encerrou em {stage_lock_text(selected_stage)}."
                 )
-                return
+                st.stop()
 
             invalid_rows, payload_rows = build_prediction_payloads_from_state(
                 visible_prediction_rows,
@@ -3520,6 +2446,10 @@ def render_card_group_predictions(
                 invalid_rows,
                 f"Todos os palpites de {save_scope_label} foram salvos.",
             )
+
+    if is_group_stage(selected_stage):
+        with st.expander("Campeão e artilheiro", expanded=True):
+            render_bonus_predictions_section(user_id, teams, supabase)
 
     if selected_group:
         st.markdown(f"### Grupo {selected_group}")
@@ -3537,6 +2467,7 @@ def render_card_group_predictions(
         match_locked = is_stage_locked(stage)
         home_team = match["home_team"]
         away_team = match["away_team"]
+        match_no = match.get("match_no", "")
         group_name = match.get("group_name", "")
         kickoff_text = format_kickoff(match.get("kickoff_at"))
 
@@ -3550,31 +2481,29 @@ def render_card_group_predictions(
         default_advancing = ""
 
         if not existing.empty:
-            default_home = safe_int(
-                existing.iloc[0].get("home_goals"), default=None)
-            default_away = safe_int(
-                existing.iloc[0].get("away_goals"), default=None)
+            default_home = safe_int(existing.iloc[0].get("home_goals"))
+            default_away = safe_int(existing.iloc[0].get("away_goals"))
             default_advancing = existing.iloc[0].get("advancing_team") or ""
 
-        st.divider()
+        st.markdown('<div class="match-card">', unsafe_allow_html=True)
 
-        lock_badge = '<span class="pill pill-red">Travado</span>' if match_locked else '<span class="pill pill-green">Aberto</span>'
+        saved_badge = '<span class="pill pill-green">Palpite salvo</span>' if not existing.empty else '<span class="pill">Ainda não salvo</span>'
+        lock_badge = '<span class="pill pill-red">Travado</span>' if match_locked else '<span class="pill pill-blue">Aberto</span>'
 
         st.markdown(
             f"""
             <div class="match-title">{home_team} x {away_team}</div>
             <div class="match-meta">
-                {kickoff_text} {f"• Grupo {group_name}" if group_name else ""} &nbsp; {lock_badge}
+                {kickoff_text} {f"• Grupo {group_name}" if group_name else ""} &nbsp; {saved_badge} &nbsp; {lock_badge}
             </div>
             """,
             unsafe_allow_html=True,
         )
 
         if is_knockout_stage(stage):
-            col1, col2, col3, col4, col5 = st.columns(
-                [0.55, 0.08, 0.55, 0.9, 0.5])
+            col1, col2, col3, col4 = st.columns([1.4, 0.28, 1.4, 1.2])
         else:
-            col1, col2, col3, col5 = st.columns([0.55, 0.08, 0.55, 0.5])
+            col1, col2, col3 = st.columns([1.4, 0.28, 1.4])
 
         with col1:
             home_goals = st.number_input(
@@ -3590,7 +2519,7 @@ def render_card_group_predictions(
         with col2:
             st.markdown("<br>", unsafe_allow_html=True)
             st.markdown(
-                "<div style='text-align:center;font-weight:900;font-size:1.15rem;color:#111827;'>×</div>",
+                "<div style='text-align:center;font-weight:900;font-size:1.35rem;color:#111827;'>×</div>",
                 unsafe_allow_html=True,
             )
 
@@ -3616,6 +2545,8 @@ def render_card_group_predictions(
                     advancing_team = inferred_advancing
                     st.markdown("<br>", unsafe_allow_html=True)
                     st.markdown(f"**Classificado:** {advancing_team}")
+                    st.caption(
+                        "Definido automaticamente pelo vencedor do seu palpite.")
                 else:
                     advancing_options = ["", home_team, away_team]
                     advancing_index = 0
@@ -3631,9 +2562,13 @@ def render_card_group_predictions(
                         key=f"pred_adv_{match_id}",
                         disabled=match_locked,
                     )
+        else:
+            st.caption(
+                "Fase de grupos: aqui você preenche apenas o placar. Campeão e artilheiro ficam no topo desta tela.")
 
-        with col5:
-            st.markdown("<br>", unsafe_allow_html=True)
+        save_col1, save_col2 = st.columns([1, 4])
+
+        with save_col1:
             if st.button(
                 "Salvar",
                 key=f"save_pred_{match_id}",
@@ -3643,12 +2578,12 @@ def render_card_group_predictions(
                 if is_stage_locked(stage):
                     st.error(
                         f"Não é possível alterar este jogo. O prazo de {stage} encerrou em {stage_lock_text(stage)}.")
-                    return
+                    st.stop()
 
                 if home_goals is None or away_goals is None:
                     st.error(
                         f"Preencha o placar de {home_team} x {away_team} antes de salvar.")
-                    return
+                    st.stop()
 
                 final_advancing = None
                 if is_knockout_stage(stage):
@@ -3657,7 +2592,7 @@ def render_card_group_predictions(
                     if not final_advancing:
                         st.error(
                             "Como o palpite está empatado, selecione quem se classifica antes de salvar.")
-                        return
+                        st.stop()
 
                 payload = {
                     "user_id": user_id,
@@ -3680,93 +2615,17 @@ def render_card_group_predictions(
                 except Exception as exc:
                     st.error(f"Erro ao salvar palpite: {exc}")
 
-        if match_id_str in saved_ids:
-            status_pill("Salvo", "green")
+        with save_col2:
+            if match_id_str in saved_ids:
+                status_pill("Já preenchido", "green")
+            else:
+                status_pill("Pendente")
 
-
-def render_match_predictions_page():
-    if not st.session_state.get("is_logged_in", False):
-        st.warning("Você precisa fazer login para registrar palpites.")
-        return
-
-    user_id = st.session_state["user_id"]
-    username = st.session_state.get("username", "")
-    supabase = get_client()
-    matches = sort_matches_for_display(
-        load_table("matches", order_by="match_no"))
-
-    if matches.empty:
-        st.warning(
-            "Nenhum jogo encontrado. Rode o seed com `python -m src.seed`.")
-        return
-
-    teams = get_all_teams(matches)
-    predictions = load_table("predictions")
-
-    if not predictions.empty and "user_id" in predictions.columns:
-        user_predictions = predictions[predictions["user_id"] == user_id].copy(
-        )
-    else:
-        user_predictions = pd.DataFrame()
-
-    st.markdown(
-        """
-        <div class="section-card">
-            <h3 style="margin-bottom:0.25rem;">Meus palpites</h3>
-            <p style="color:#6b7280;margin-bottom:0;">
-                Preencha pelo app, use o modo agrupado rápido ou baixe/importe um template em Excel.
-            </p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    with st.expander("Campeão e artilheiro", expanded=True):
-        render_bonus_predictions_section(
-            user_id, teams, supabase, key_suffix="top")
-
-    main_tab_app, main_tab_excel, main_tab_overview = st.tabs(
-        ["Preencher no app", "Excel template", "Conferência geral"]
-    )
-
-    with main_tab_excel:
-        render_excel_template_import_page(user_id, username, supabase, matches)
-
-    with main_tab_overview:
-        render_predictions_overview_page(user_id, matches)
-
-    with main_tab_app:
-        stages = matches["stage"].dropna().unique(
-        ).tolist() if "stage" in matches.columns else []
-
-        if not stages:
-            st.warning(
-                "A tabela de jogos não possui a coluna `stage` preenchida.")
-            return
-
-        fill_mode = st.radio(
-            "Modo de preenchimento",
-            ["Preenchimento agrupado rápido", "Por grupo / jogo a jogo"],
-            horizontal=True,
-            key="prediction_fill_mode",
-        )
-
-        selected_stage = st.selectbox(
-            "Fase", stages, key="prediction_stage_main")
-        render_stage_lock_message(
-            selected_stage, label=f"Fase selecionada — {selected_stage}")
-
-        if fill_mode == "Preenchimento agrupado rápido":
-            render_grouped_group_predictions(
-                user_id, supabase, matches, user_predictions, selected_stage)
-        else:
-            # Mantém o modo antigo de cards para revisão jogo a jogo.
-            st.session_state["pred_stage"] = selected_stage
-            render_card_group_predictions(
-                user_id, username, supabase, matches, user_predictions, teams)
+        st.markdown("</div>", unsafe_allow_html=True)
 
     # Botão final de "Salvar todos" removido/comentado a pedido.
-    # Mantemos apenas os botões no topo do modo por grupo e no fim do bloco agrupado.
+    # Mantemos apenas o botão de salvar todos no topo da tela, logo após os filtros.
+    # Se quiser reativar no futuro, inserir aqui o bloco de save_all_group.
 
 
 def render_predictions_page():
@@ -4271,20 +3130,22 @@ def render_admin_page():
                 default_advancing = existing.iloc[0].get(
                     "advancing_team") or ""
 
-            st.divider()
+            st.markdown('<div class="match-card">', unsafe_allow_html=True)
+
+            result_badge = '<span class="pill pill-green">Resultado salvo</span>' if not existing.empty else '<span class="pill">Ainda não salvo</span>'
 
             st.markdown(
                 f"""
                 <div class="match-title">{home_team} x {away_team}</div>
-                <div class="match-meta">{kickoff_text}</div>
+                <div class="match-meta">{kickoff_text} &nbsp; {result_badge}</div>
                 """,
                 unsafe_allow_html=True,
             )
 
             if is_knockout_stage(stage):
-                col1, col2, col3, col4 = st.columns([0.8, 0.10, 0.8, 1.0])
+                col1, col2, col3, col4 = st.columns([1.4, 0.28, 1.4, 1.2])
             else:
-                col1, col2, col3 = st.columns([0.8, 0.10, 0.8])
+                col1, col2, col3 = st.columns([1.4, 0.28, 1.4])
 
             with col1:
                 home_goals = st.number_input(
@@ -4340,7 +3201,7 @@ def render_admin_page():
                             key=f"actual_adv_{match_id}",
                         )
             else:
-                pass
+                st.caption("Fase de grupos: cadastre apenas o placar.")
 
             save_col1, save_col2 = st.columns([1, 4])
 
@@ -4380,6 +3241,8 @@ def render_admin_page():
                     status_pill("Resultado já cadastrado", "green")
                 else:
                     status_pill("Resultado pendente")
+
+            st.markdown("</div>", unsafe_allow_html=True)
 
     with tab_chat:
         render_google_chat_admin_page(matches)
