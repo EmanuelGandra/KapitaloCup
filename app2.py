@@ -1524,20 +1524,15 @@ def send_google_chat_image(textbody: str, image_path: str):
     )
 
 
-def dataframe_to_png(df: pd.DataFrame, title: str = "", subtitle: str = "") -> str:
-    """Gera uma imagem PNG simples e legível de uma tabela.
-
-    Quando title/subtitle ficam vazios, a imagem sai praticamente só com a
-    tabela. Isso é usado nas mensagens de pendências do Google Chat para evitar
-    título duplicado e espaço branco grande no anexo.
-    """
+def dataframe_to_png(df: pd.DataFrame, title: str, subtitle: str = "") -> str:
+    """Gera uma imagem PNG simples e legível de uma tabela."""
     try:
         import matplotlib.pyplot as plt
     except Exception as exc:
         raise RuntimeError(
             "matplotlib não instalado. Adicione matplotlib ao requirements.txt.") from exc
 
-    table_df = df.copy() if isinstance(df, pd.DataFrame) else pd.DataFrame()
+    table_df = df.copy()
 
     if table_df.empty:
         table_df = pd.DataFrame({"Mensagem": ["Sem dados para exibir."]})
@@ -1555,25 +1550,14 @@ def dataframe_to_png(df: pd.DataFrame, title: str = "", subtitle: str = "") -> s
         table_df.loc[len(table_df)] = ["..." for _ in table_df.columns]
 
     n_rows, n_cols = table_df.shape
-    has_title = bool(str(title or "").strip() or str(subtitle or "").strip())
-
-    fig_width = max(7, min(18, 1.65 * n_cols + 2.0))
-    if has_title:
-        fig_height = max(3.0, min(18, 0.42 * (n_rows + 2) + 1.35))
-    else:
-        fig_height = max(1.25, min(16, 0.42 * (n_rows + 1) + 0.35))
+    fig_width = max(9, min(18, 1.8 * n_cols + 3))
+    fig_height = max(3.2, min(18, 0.45 * (n_rows + 2) + 1.6))
 
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
     ax.axis("off")
 
-    if has_title:
-        title_text = str(title or "").strip()
-        subtitle_text = str(subtitle or "").strip()
-        if title_text and subtitle_text:
-            title_text = f"{title_text}\n{subtitle_text}"
-        elif subtitle_text:
-            title_text = subtitle_text
-        ax.set_title(title_text, fontsize=15, fontweight="bold", pad=12)
+    title_text = title if not subtitle else f"{title}\n{subtitle}"
+    ax.set_title(title_text, fontsize=15, fontweight="bold", pad=18)
 
     table = ax.table(
         cellText=table_df.values,
@@ -1599,19 +1583,14 @@ def dataframe_to_png(df: pd.DataFrame, title: str = "", subtitle: str = "") -> s
 
     output = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
     output.close()
-
-    if has_title:
-        fig.tight_layout(pad=0.35)
-        fig.savefig(output.name, dpi=180, bbox_inches="tight", pad_inches=0.08)
-    else:
-        fig.tight_layout(pad=0.02)
-        fig.savefig(output.name, dpi=180, bbox_inches="tight", pad_inches=0.02)
-
+    fig.tight_layout()
+    fig.savefig(output.name, dpi=180, bbox_inches="tight")
     plt.close(fig)
 
     return output.name
 
-def build_match_predictions_table(match_id: str, prediction_filter: str = "all") -> tuple[pd.DataFrame, dict]:
+
+def build_match_predictions_table(match_id: str) -> tuple[pd.DataFrame, dict]:
     profiles = load_table("profiles")
     matches = load_table("matches", order_by="match_no")
     matches = sort_matches_for_display(matches)
@@ -1679,16 +1658,7 @@ def build_match_predictions_table(match_id: str, prediction_filter: str = "all")
             }
         )
 
-    out = pd.DataFrame(rows)
-
-    if not out.empty:
-        prediction_filter = str(prediction_filter or "all").strip().lower()
-        if prediction_filter in {"complete", "completed", "only_complete", "somente_com_palpite"}:
-            out = out[out["Palpite"] != "Pendente"].copy()
-        elif prediction_filter in {"pending", "pendentes", "only_pending", "somente_pendentes"}:
-            out = out[out["Palpite"] == "Pendente"].copy()
-
-    return out.reset_index(drop=True), match
+    return pd.DataFrame(rows), match
 
 
 def build_match_chat_text(match: dict) -> str:
@@ -1718,20 +1688,15 @@ def build_ranking_chat_text() -> str:
 
 
 def build_pending_predictions_summary_table() -> pd.DataFrame:
-    """Tabela apenas com usuários que ainda têm jogos pendentes.
-
-    Usuários com todos os placares preenchidos não aparecem na lista enviada
-    para o Google Chat. Isso deixa a mensagem focada só em quem precisa agir.
-    """
+    """Tabela com quantos jogos faltam para cada usuário completar."""
     profiles = load_table("profiles")
     matches = load_table("matches", order_by="match_no")
     predictions = load_table("predictions")
 
     total_matches = len(matches) if not matches.empty else 0
 
-    columns = ["Usuário", "Jogos preenchidos", "Jogos pendentes", "Total de jogos"]
     if profiles.empty:
-        return pd.DataFrame(columns=columns)
+        return pd.DataFrame(columns=["Usuário", "Jogos preenchidos", "Jogos pendentes", "Total de jogos", "Status"])
 
     rows = []
     for _, user in profiles.sort_values("username").iterrows():
@@ -1739,87 +1704,31 @@ def build_pending_predictions_summary_table() -> pd.DataFrame:
         username = user.get("username", "")
 
         if not predictions.empty and {"user_id", "match_id"}.issubset(predictions.columns):
-            filled = predictions[predictions["user_id"] == user_id]["match_id"].astype(str).nunique()
+            filled = predictions[predictions["user_id"] ==
+                                 user_id]["match_id"].astype(str).nunique()
         else:
             filled = 0
 
         pending = max(total_matches - int(filled), 0)
-
-        # Só entram usuários pendentes. Quem completou todos os placares sai da imagem/lista.
-        if pending <= 0 and total_matches > 0:
-            continue
-
         rows.append(
             {
                 "Usuário": username,
                 "Jogos preenchidos": int(filled),
                 "Jogos pendentes": pending,
                 "Total de jogos": total_matches,
+                "Status": "Completo" if pending == 0 and total_matches > 0 else "Pendente",
             }
         )
 
-    out = pd.DataFrame(rows, columns=columns)
+    out = pd.DataFrame(rows)
     if out.empty:
         return out
 
     return out.sort_values(["Jogos pendentes", "Usuário"], ascending=[False, True]).reset_index(drop=True)
 
 
-def build_pending_extras_summary_table() -> pd.DataFrame:
-    """Tabela apenas com usuários que ainda não completaram Campeão/Artilheiro."""
-    profiles = load_table("profiles")
-    bonus_predictions = load_table("bonus_predictions")
-
-    columns = ["Usuário", "Campeão", "Artilheiro", "Pendências"]
-    if profiles.empty:
-        return pd.DataFrame(columns=columns)
-
-    rows = []
-    for _, user in profiles.sort_values("username").iterrows():
-        user_id = user.get("id")
-        username = user.get("username", "")
-
-        champion = ""
-        top_scorer = ""
-
-        if not bonus_predictions.empty and "user_id" in bonus_predictions.columns:
-            row = bonus_predictions[bonus_predictions["user_id"] == user_id]
-            if not row.empty:
-                champion = row.iloc[0].get("champion") or ""
-                top_scorer = row.iloc[0].get("top_scorer") or ""
-
-        missing_items = []
-        if not str(champion).strip():
-            missing_items.append("Campeão")
-        if not str(top_scorer).strip():
-            missing_items.append("Artilheiro")
-
-        # Só entram usuários com algum extra pendente.
-        if not missing_items:
-            continue
-
-        rows.append(
-            {
-                "Usuário": username,
-                "Campeão": champion if str(champion).strip() else "Pendente",
-                "Artilheiro": top_scorer if str(top_scorer).strip() else "Pendente",
-                "Pendências": ", ".join(missing_items),
-            }
-        )
-
-    out = pd.DataFrame(rows, columns=columns)
-    if out.empty:
-        return out
-
-    return out.sort_values(["Pendências", "Usuário"], ascending=[False, True]).reset_index(drop=True)
-
-
 def build_bonus_predictions_all_users_table() -> pd.DataFrame:
-    """Tabela com campeão e artilheiro escolhidos por todos os usuários.
-
-    Mantida para compatibilidade/consulta futura. Para mensagens de pendência,
-    use build_pending_extras_summary_table().
-    """
+    """Tabela com campeão e artilheiro escolhidos por todos os usuários."""
     profiles = load_table("profiles")
     bonus_predictions = load_table("bonus_predictions")
 
@@ -1857,16 +1766,8 @@ def build_bonus_predictions_all_users_table() -> pd.DataFrame:
 def build_pending_chat_text() -> str:
     return (
         "🏆 Kapitalo Cup\n\n"
-        "Pendências de placares por participante.\n"
-        "A tabela abaixo mostra somente quem ainda não completou todos os jogos."
-    )
-
-
-def build_pending_extras_chat_text() -> str:
-    return (
-        "🏆 Kapitalo Cup\n\n"
-        "Pendências de extras por participante.\n"
-        "A tabela abaixo mostra somente quem ainda precisa preencher campeão e/ou artilheiro."
+        "Pendências de palpites por participante.\n\n"
+        "Segue a lista com quantos jogos ainda faltam para cada pessoa completar."
     )
 
 
@@ -1876,6 +1777,7 @@ def build_bonus_predictions_chat_text() -> str:
         "Campeões e artilheiros escolhidos pelos participantes.\n\n"
         "Segue o consolidado dos extras cadastrados."
     )
+
 
 def render_google_chat_admin_page(matches: pd.DataFrame):
     st.markdown("### Google Chat")
@@ -1900,7 +1802,7 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
         return
 
     tab_match_chat, tab_ranking_chat, tab_pending_chat, tab_bonus_chat = st.tabs(
-        ["Palpites por jogo", "Ranking atualizado", "Pendências placares", "Pendências extras"])
+        ["Palpites por jogo", "Ranking atualizado", "Pendências", "Campeões e artilheiros"])
 
     with tab_match_chat:
         st.markdown("#### Enviar palpites de um jogo")
@@ -1956,41 +1858,14 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
             "Jogo", match_options, key="chat_match_selected")
         selected_match_id = match_option_map[selected_match_label]
 
-        prediction_filter_label = st.radio(
-            "Quem entra na tabela/imagem?",
-            ["Todos", "Somente com palpite", "Somente pendentes"],
-            horizontal=True,
-            key="chat_match_prediction_filter",
-            help=(
-                "Todos inclui quem já mandou palpite e quem ainda está pendente. "
-                "Somente com palpite tira os pendentes. Somente pendentes mostra só quem ainda não preencheu."
-            ),
-        )
-        prediction_filter_map = {
-            "Todos": "all",
-            "Somente com palpite": "complete",
-            "Somente pendentes": "pending",
-        }
-        prediction_filter = prediction_filter_map[prediction_filter_label]
-
-        table_df, match_info = build_match_predictions_table(
-            selected_match_id,
-            prediction_filter=prediction_filter,
-        )
-        all_table_df, _ = build_match_predictions_table(
-            selected_match_id,
-            prediction_filter="all",
-        )
+        table_df, match_info = build_match_predictions_table(selected_match_id)
 
         st.markdown("##### Prévia da tabela")
         st.dataframe(table_df, use_container_width=True,
                      hide_index=True, height=420)
 
-        pending_count = int((all_table_df["Palpite"] == "Pendente").sum(
-        )) if "Palpite" in all_table_df.columns else 0
-        complete_count = int((all_table_df["Palpite"] != "Pendente").sum(
-        )) if "Palpite" in all_table_df.columns else 0
-        st.caption(f"Filtro da imagem: {prediction_filter_label}. Com palpite: {complete_count} | Pendentes: {pending_count}.")
+        pending_count = int((table_df["Palpite"] == "Pendente").sum(
+        )) if "Palpite" in table_df.columns else 0
         if pending_count:
             st.warning(
                 f"Ainda existem {pending_count} participantes sem palpite para este jogo.")
@@ -2003,7 +1878,7 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
             "Enviar palpites deste jogo para Google Chat",
             key="send_match_predictions_chat",
             use_container_width=True,
-            disabled=not config_ok or table_df.empty,
+            disabled=not config_ok,
         ):
             try:
                 title = f"Palpites — {match_info.get('home_team', '')} x {match_info.get('away_team', '')}"
@@ -2075,43 +1950,47 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
             disabled=not config_ok or pending_view.empty,
         ):
             try:
-                image_path = dataframe_to_png(pending_view)
+                image_path = dataframe_to_png(
+                    pending_view,
+                    title="Pendências Kapitalo Cup",
+                    subtitle=datetime.now().strftime("Atualizado em %d/%m/%Y %H:%M"),
+                )
                 send_google_chat_image(chat_text, image_path)
                 st.success("Pendências enviadas para o Google Chat.")
             except Exception as exc:
                 st.error(f"Erro ao enviar pendências para Google Chat: {exc}")
 
     with tab_bonus_chat:
-        st.markdown("#### Enviar pendências de extras")
+        st.markdown("#### Enviar campeões e artilheiros")
 
-        extras_pending_view = build_pending_extras_summary_table()
-        st.markdown("##### Prévia dos extras pendentes")
+        bonus_view = build_bonus_predictions_all_users_table()
+        st.markdown("##### Prévia dos extras")
+        st.dataframe(bonus_view, use_container_width=True,
+                     hide_index=True, height=420)
 
-        if extras_pending_view.empty:
-            st.success("Todos os participantes já preencheram campeão e artilheiro.")
-        else:
-            st.dataframe(extras_pending_view, use_container_width=True,
-                         hide_index=True, height=420)
-
-        chat_text = build_pending_extras_chat_text()
+        chat_text = build_bonus_predictions_chat_text()
         with st.expander("Prévia da mensagem"):
             st.text(chat_text)
 
         if st.button(
-            "Enviar pendências de extras para Google Chat",
+            "Enviar campeões e artilheiros para Google Chat",
             key="send_bonus_predictions_chat",
             use_container_width=True,
-            disabled=not config_ok or extras_pending_view.empty,
+            disabled=not config_ok or bonus_view.empty,
         ):
             try:
-                # Sem título/subtítulo: o anexo fica só com a tabela, sem espaço branco grande.
-                image_path = dataframe_to_png(extras_pending_view)
+                image_path = dataframe_to_png(
+                    bonus_view,
+                    title="Campeões e artilheiros",
+                    subtitle=datetime.now().strftime("Atualizado em %d/%m/%Y %H:%M"),
+                )
                 send_google_chat_image(chat_text, image_path)
                 st.success(
-                    "Pendências de extras enviadas para o Google Chat.")
+                    "Campeões e artilheiros enviados para o Google Chat.")
             except Exception as exc:
                 st.error(
-                    f"Erro ao enviar pendências de extras para Google Chat: {exc}")
+                    f"Erro ao enviar campeões e artilheiros para Google Chat: {exc}")
+
 
 # ============================================================
 # RANKING E DETALHE DE PONTOS
