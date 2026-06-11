@@ -1560,6 +1560,8 @@ def dataframe_to_png(
     subtitle: str = "",
     footer: str = "",
     highlight_participants: dict[str, str] | None = None,
+    max_rows: int | None = 42,
+    max_fig_height: float = 18,
 ) -> str:
     """Gera uma imagem PNG compacta e legível de uma tabela.
 
@@ -1578,11 +1580,11 @@ def dataframe_to_png(
     if table_df.empty:
         table_df = pd.DataFrame({"Mensagem": ["Sem dados para exibir."]})
 
-    # Evita imagens gigantes no Chat. O app continua mostrando a tabela completa.
-    max_rows = 42
+    # Por padrão, limita tabelas muito grandes. Quando max_rows=None,
+    # a imagem inclui todas as linhas, sem inserir a linha de reticências.
     truncated = False
-    if len(table_df) > max_rows:
-        table_df = table_df.head(max_rows).copy()
+    if max_rows is not None and len(table_df) > int(max_rows):
+        table_df = table_df.head(int(max_rows)).copy()
         truncated = True
 
     table_df = table_df.fillna("").astype(str)
@@ -1604,7 +1606,7 @@ def dataframe_to_png(
     subtitle_height = 0.32 if subtitle_text else 0
     footer_height = 0.36 if has_footer else 0
     table_height = 0.31 * (n_rows + 1)
-    fig_height = max(1.7, min(18, table_height + title_height + subtitle_height + footer_height + 0.34))
+    fig_height = max(1.7, min(max_fig_height, table_height + title_height + subtitle_height + footer_height + 0.34))
 
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
     ax.axis("off")
@@ -2454,7 +2456,14 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
                 title = f"Palpites — {match_info.get('home_team', '')} x {match_info.get('away_team', '')}"
                 subtitle = f"{match_info.get('stage', '')} • {format_kickoff(match_info.get('kickoff_at'))}"
                 footer = "Legenda: lobo-guará e mico-leão = palpites aleatórios; claude fable 5 = palpite da IA."
-                image_path = dataframe_to_png(table_df, title=title, subtitle=subtitle, footer=footer)
+                image_path = dataframe_to_png(
+                    table_df,
+                    title=title,
+                    subtitle=subtitle,
+                    footer=footer,
+                    max_rows=None,
+                    max_fig_height=32,
+                )
                 send_google_chat_image(chat_text, image_path)
                 st.success("Palpites enviados para o Google Chat.")
             except Exception as exc:
