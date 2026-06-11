@@ -2587,6 +2587,8 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
                     ranking_view,
                     title="Ranking Kapitalo Cup",
                     subtitle=now_app_tz().strftime("Atualizado em %d/%m/%Y %H:%M"),
+                    max_rows=None,
+                    max_fig_height=36,
                 )
                 send_google_chat_image(chat_text, image_path)
                 st.success("Ranking enviado para o Google Chat.")
