@@ -1774,7 +1774,7 @@ def build_match_median_row(match_predictions: pd.DataFrame, match: dict) -> dict
             advancing_label = "Empate mediano"
 
     return {
-        "Participante": "Mediana Kapitalo",
+        "Participante": "moda Kapitalo",
         "Palpite": f"{home_team} {home_label} x {away_label} {away_team}",
         "Classificado": advancing_label,
     }
