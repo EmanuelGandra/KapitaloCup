@@ -1554,18 +1554,12 @@ def send_google_chat_image(textbody: str, image_path: str):
     )
 
 
-def dataframe_to_png(
-    df: pd.DataFrame,
-    title: str = "",
-    subtitle: str = "",
-    footer: str = "",
-    highlight_participants: dict[str, str] | None = None,
-) -> str:
-    """Gera uma imagem PNG compacta e legível de uma tabela.
+def dataframe_to_png(df: pd.DataFrame, title: str = "", subtitle: str = "") -> str:
+    """Gera uma imagem PNG simples e legível de uma tabela.
 
-    O enquadramento foi ajustado para evitar o espaço branco grande que aparecia
-    nas imagens enviadas ao Google Chat. Também permite destacar linhas por
-    participante e adicionar um rodapé/legenda.
+    Quando title/subtitle ficam vazios, a imagem sai praticamente só com a
+    tabela. Isso é usado nas mensagens de pendências do Google Chat para evitar
+    título duplicado e espaço branco grande no anexo.
     """
     try:
         import matplotlib.pyplot as plt
@@ -1579,7 +1573,7 @@ def dataframe_to_png(
         table_df = pd.DataFrame({"Mensagem": ["Sem dados para exibir."]})
 
     # Evita imagens gigantes no Chat. O app continua mostrando a tabela completa.
-    max_rows = 42
+    max_rows = 35
     truncated = False
     if len(table_df) > max_rows:
         table_df = table_df.head(max_rows).copy()
@@ -1591,120 +1585,58 @@ def dataframe_to_png(
         table_df.loc[len(table_df)] = ["..." for _ in table_df.columns]
 
     n_rows, n_cols = table_df.shape
-    title_text = str(title or "").strip()
-    subtitle_text = str(subtitle or "").strip()
-    footer_text = str(footer or "").strip()
-    has_title = bool(title_text or subtitle_text)
-    has_footer = bool(footer_text)
+    has_title = bool(str(title or "").strip() or str(subtitle or "").strip())
 
-    # Enquadramento mais justo: altura baseada no número real de linhas,
-    # sem centralizar a tabela no meio da figura.
-    fig_width = max(6.8, min(15.5, 1.95 * n_cols + 1.4))
-    title_height = 0.48 if title_text else 0
-    subtitle_height = 0.32 if subtitle_text else 0
-    footer_height = 0.36 if has_footer else 0
-    table_height = 0.31 * (n_rows + 1)
-    fig_height = max(1.7, min(18, table_height + title_height + subtitle_height + footer_height + 0.34))
+    fig_width = max(7, min(18, 1.65 * n_cols + 2.0))
+    if has_title:
+        fig_height = max(3.0, min(18, 0.42 * (n_rows + 2) + 1.35))
+    else:
+        fig_height = max(1.25, min(16, 0.42 * (n_rows + 1) + 0.35))
 
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
     ax.axis("off")
 
-    y_top = 0.99
-    if title_text:
-        ax.text(
-            0.5,
-            y_top,
-            title_text,
-            ha="center",
-            va="top",
-            fontsize=12,
-            fontweight="bold",
-            transform=ax.transAxes,
-        )
-        y_top -= 0.045
-
-    if subtitle_text:
-        ax.text(
-            0.5,
-            y_top,
-            subtitle_text,
-            ha="center",
-            va="top",
-            fontsize=10.5,
-            fontweight="bold",
-            transform=ax.transAxes,
-        )
-        y_top -= 0.04
-
-    table_bottom = 0.055 if has_footer else 0.012
-    table_top = y_top - (0.018 if has_title else 0.004)
-    table_bbox_height = max(0.1, table_top - table_bottom)
+    if has_title:
+        title_text = str(title or "").strip()
+        subtitle_text = str(subtitle or "").strip()
+        if title_text and subtitle_text:
+            title_text = f"{title_text}\n{subtitle_text}"
+        elif subtitle_text:
+            title_text = subtitle_text
+        ax.set_title(title_text, fontsize=15, fontweight="bold", pad=12)
 
     table = ax.table(
         cellText=table_df.values,
         colLabels=table_df.columns,
         cellLoc="center",
         colLoc="center",
-        bbox=[0.0, table_bottom, 1.0, table_bbox_height],
+        loc="center",
     )
 
     table.auto_set_font_size(False)
-    table.set_fontsize(8.2 if n_rows > 34 else 8.8)
-
-    # Destaques leves por participante.
-    # Cores mantidas discretas para não parecer alerta/erro.
-    default_random_color = "#fff7d6"
-    default_ai_color = "#eef2ff"
-    participant_colors = {
-        "lobo-guará": default_random_color,
-        "lobo-guara": default_random_color,
-        "mico-leão": default_random_color,
-        "mico-leao": default_random_color,
-        "claude fable 5": default_ai_color,
-    }
-    if highlight_participants:
-        participant_colors.update({str(k).casefold(): v for k, v in highlight_participants.items()})
-
-    participant_col_idx = None
-    for idx, col_name in enumerate(table_df.columns):
-        if str(col_name).strip().casefold() in {"participante", "usuário", "usuario"}:
-            participant_col_idx = idx
-            break
+    table.set_fontsize(9)
+    table.scale(1, 1.35)
 
     for (row, col), cell in table.get_celld().items():
         cell.set_edgecolor("#d1d5db")
-        cell.set_linewidth(0.55)
-
         if row == 0:
             cell.set_facecolor("#ba083a")
             cell.set_text_props(color="white", weight="bold")
-            continue
-
-        row_color = "#f9fafb" if row % 2 == 0 else "#ffffff"
-
-        if participant_col_idx is not None and row - 1 < len(table_df):
-            participant = str(table_df.iloc[row - 1, participant_col_idx]).strip().casefold()
-            if participant in participant_colors:
-                row_color = participant_colors[participant]
-
-        cell.set_facecolor(row_color)
-
-    if has_footer:
-        ax.text(
-            0.0,
-            0.012,
-            footer_text,
-            ha="left",
-            va="bottom",
-            fontsize=8.6,
-            color="#374151",
-            transform=ax.transAxes,
-        )
+        elif row % 2 == 0:
+            cell.set_facecolor("#f9fafb")
+        else:
+            cell.set_facecolor("#ffffff")
 
     output = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
     output.close()
 
-    fig.savefig(output.name, dpi=190, bbox_inches="tight", pad_inches=0.025)
+    if has_title:
+        fig.tight_layout(pad=0.35)
+        fig.savefig(output.name, dpi=180, bbox_inches="tight", pad_inches=0.08)
+    else:
+        fig.tight_layout(pad=0.02)
+        fig.savefig(output.name, dpi=180, bbox_inches="tight", pad_inches=0.02)
+
     plt.close(fig)
 
     return output.name
@@ -1730,7 +1662,7 @@ def build_match_predictions_table(match_id: str, prediction_filter: str = "all")
     rows = []
 
     if profiles.empty:
-        return pd.DataFrame(columns=["Participante", "Palpite", "Classificado"]), match
+        return pd.DataFrame(columns=["Participante", "Palpite", "Classificado", "Atualizado em"]), match
 
     if predictions.empty:
         predictions = pd.DataFrame(columns=[
@@ -1751,6 +1683,7 @@ def build_match_predictions_table(match_id: str, prediction_filter: str = "all")
                     "Participante": username,
                     "Palpite": "Pendente",
                     "Classificado": "—" if is_group_stage(stage) else "Pendente",
+                    "Atualizado em": "",
                 }
             )
             continue
@@ -1773,6 +1706,7 @@ def build_match_predictions_table(match_id: str, prediction_filter: str = "all")
                 "Participante": username,
                 "Palpite": f"{home_team} {home_goals} x {away_goals} {away_team}",
                 "Classificado": "—" if is_group_stage(stage) else advancing_team,
+                "Atualizado em": format_kickoff(pred.get("updated_at")) if "updated_at" in pred else "",
             }
         )
 
@@ -2109,13 +2043,8 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
             try:
                 title = f"Palpites — {match_info.get('home_team', '')} x {match_info.get('away_team', '')}"
                 subtitle = f"{match_info.get('stage', '')} • {format_kickoff(match_info.get('kickoff_at'))}"
-                footer = "Legenda: lobo-guará e mico-leão = palpites aleatórios; claude fable 5 = palpite da IA."
                 image_path = dataframe_to_png(
-                    table_df,
-                    title=title,
-                    subtitle=subtitle,
-                    footer=footer,
-                )
+                    table_df, title=title, subtitle=subtitle)
                 send_google_chat_image(chat_text, image_path)
                 st.success("Palpites enviados para o Google Chat.")
             except Exception as exc:
