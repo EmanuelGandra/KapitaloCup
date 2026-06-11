@@ -5,6 +5,7 @@ import json
 import re
 import tempfile
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
@@ -51,6 +52,31 @@ STAGE_LOCK_SECRET_KEYS = {
     "final": "PREDICTION_LOCK_FINAL_AT",
     "extras": "PREDICTION_LOCK_EXTRAS_AT",
 }
+
+# Timezone oficial do app. Datas sem timezone no secrets.toml são tratadas como horário de Brasília.
+APP_TIMEZONE = "America/Sao_Paulo"
+
+
+def now_app_tz() -> pd.Timestamp:
+    """Agora no timezone oficial do bolão."""
+    return pd.Timestamp(datetime.now(ZoneInfo(APP_TIMEZONE)))
+
+
+def parse_app_datetime(value) -> pd.Timestamp:
+    """Converte datas do app/secrets para America/Sao_Paulo.
+
+    Se o valor vier sem timezone, ele é interpretado como horário de Brasília.
+    Se vier com timezone explícito, é convertido para Brasília.
+    """
+    dt = pd.to_datetime(value)
+
+    if pd.isna(dt):
+        raise ValueError(f"Data inválida: {value}")
+
+    if getattr(dt, "tzinfo", None) is None:
+        return dt.tz_localize(APP_TIMEZONE)
+
+    return dt.tz_convert(APP_TIMEZONE)
 
 
 st.set_page_config(
@@ -386,7 +412,8 @@ def fetch_df_paginated(table_name: str, order_by: str | None = None, page_size: 
 
         # Guarda contra loop infinito caso a API retorne comportamento inesperado.
         if start > 250_000:
-            raise RuntimeError(f"Paginação interrompida em {table_name}: mais de 250.000 linhas.")
+            raise RuntimeError(
+                f"Paginação interrompida em {table_name}: mais de 250.000 linhas.")
 
     return pd.DataFrame(rows)
 
@@ -767,6 +794,9 @@ def get_stage_lock_at(stage_or_phase: str) -> pd.Timestamp:
     Busca prazo específico por fase no secrets.toml.
     Se não existir, usa PREDICTION_LOCK_AT como fallback.
     Se também não existir, usa DEFAULT_STAGE_LOCKS.
+
+    Datas sem timezone são interpretadas como horário de Brasília
+    (America/Sao_Paulo), para evitar o servidor travar o bolão em UTC.
     """
     lock_key = get_stage_lock_key(stage_or_phase)
     secret_key = STAGE_LOCK_SECRET_KEYS.get(lock_key)
@@ -784,13 +814,13 @@ def get_stage_lock_at(stage_or_phase: str) -> pd.Timestamp:
         raw_value = default_value
 
     try:
-        return pd.to_datetime(raw_value)
+        return parse_app_datetime(raw_value)
     except Exception:
-        return pd.to_datetime(default_value)
+        return parse_app_datetime(default_value)
 
 
 def is_stage_locked(stage_or_phase: str) -> bool:
-    return pd.Timestamp(datetime.now()) >= get_stage_lock_at(stage_or_phase)
+    return now_app_tz() >= get_stage_lock_at(stage_or_phase)
 
 
 def stage_lock_text(stage_or_phase: str) -> str:
@@ -822,7 +852,7 @@ def prediction_lock_text() -> str:
 
 
 def next_open_lock_info() -> tuple[str, pd.Timestamp] | None:
-    now = pd.Timestamp(datetime.now())
+    now = now_app_tz()
     future_rows = []
 
     for lock_key in DEFAULT_STAGE_LOCKS:
@@ -837,7 +867,7 @@ def next_open_lock_info() -> tuple[str, pd.Timestamp] | None:
 
 
 def build_lock_schedule_df() -> pd.DataFrame:
-    now = pd.Timestamp(datetime.now())
+    now = now_app_tz()
     rows = []
 
     for lock_key in ["groups", "r32", "r16", "quarters", "semis", "third_place", "final", "extras"]:
@@ -1611,6 +1641,7 @@ def dataframe_to_png(df: pd.DataFrame, title: str = "", subtitle: str = "") -> s
 
     return output.name
 
+
 def build_match_predictions_table(match_id: str, prediction_filter: str = "all") -> tuple[pd.DataFrame, dict]:
     profiles = load_table("profiles")
     matches = load_table("matches", order_by="match_no")
@@ -1729,7 +1760,8 @@ def build_pending_predictions_summary_table() -> pd.DataFrame:
 
     total_matches = len(matches) if not matches.empty else 0
 
-    columns = ["Usuário", "Jogos preenchidos", "Jogos pendentes", "Total de jogos"]
+    columns = ["Usuário", "Jogos preenchidos",
+               "Jogos pendentes", "Total de jogos"]
     if profiles.empty:
         return pd.DataFrame(columns=columns)
 
@@ -1739,7 +1771,8 @@ def build_pending_predictions_summary_table() -> pd.DataFrame:
         username = user.get("username", "")
 
         if not predictions.empty and {"user_id", "match_id"}.issubset(predictions.columns):
-            filled = predictions[predictions["user_id"] == user_id]["match_id"].astype(str).nunique()
+            filled = predictions[predictions["user_id"] ==
+                                 user_id]["match_id"].astype(str).nunique()
         else:
             filled = 0
 
@@ -1877,6 +1910,7 @@ def build_bonus_predictions_chat_text() -> str:
         "Segue o consolidado dos extras cadastrados."
     )
 
+
 def render_google_chat_admin_page(matches: pd.DataFrame):
     st.markdown("### Google Chat")
     st.caption(
@@ -1990,7 +2024,8 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
         )) if "Palpite" in all_table_df.columns else 0
         complete_count = int((all_table_df["Palpite"] != "Pendente").sum(
         )) if "Palpite" in all_table_df.columns else 0
-        st.caption(f"Filtro da imagem: {prediction_filter_label}. Com palpite: {complete_count} | Pendentes: {pending_count}.")
+        st.caption(
+            f"Filtro da imagem: {prediction_filter_label}. Com palpite: {complete_count} | Pendentes: {pending_count}.")
         if pending_count:
             st.warning(
                 f"Ainda existem {pending_count} participantes sem palpite para este jogo.")
@@ -2049,7 +2084,7 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
                 image_path = dataframe_to_png(
                     ranking_view,
                     title="Ranking Kapitalo Cup",
-                    subtitle=datetime.now().strftime("Atualizado em %d/%m/%Y %H:%M"),
+                    subtitle=now_app_tz().strftime("Atualizado em %d/%m/%Y %H:%M"),
                 )
                 send_google_chat_image(chat_text, image_path)
                 st.success("Ranking enviado para o Google Chat.")
@@ -2088,7 +2123,8 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
         st.markdown("##### Prévia dos extras pendentes")
 
         if extras_pending_view.empty:
-            st.success("Todos os participantes já preencheram campeão e artilheiro.")
+            st.success(
+                "Todos os participantes já preencheram campeão e artilheiro.")
         else:
             st.dataframe(extras_pending_view, use_container_width=True,
                          hide_index=True, height=420)
@@ -3581,7 +3617,7 @@ def render_grouped_group_predictions(
             )
 
     if refresh_preview:
-        st.session_state["grouped_preview_refreshed_at"] = datetime.now().strftime(
+        st.session_state["grouped_preview_refreshed_at"] = now_app_tz().strftime(
             "%d/%m/%Y %H:%M:%S")
         if invalid_rows:
             st.info(
