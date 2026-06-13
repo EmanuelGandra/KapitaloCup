@@ -76,9 +76,16 @@ jobs:
             MATCH_ARG="--match-id $MANUAL_MATCH_ID --force"
           fi
 
+          FAKE_GAME_ARG=""
+          if [ "$MANUAL_MODE" = "dry-run" ] && { [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; }; then
+            echo "SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY ausentes em dry-run; usando --fake-game."
+            FAKE_GAME_ARG="--fake-game"
+          fi
+
           python send_pre_match_google_chat_centralizado.py \
             $MODE_ARG \
             $MATCH_ARG \
+            $FAKE_GAME_ARG \
             --kind "$MANUAL_KIND" \
             --minutes-before 30 \
             --early-window-minutes 7 \
