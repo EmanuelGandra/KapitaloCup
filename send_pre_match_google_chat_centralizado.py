@@ -8,6 +8,9 @@ mensagens/imagens usadas no app em:
 1) Admin > Google Chat > Palpites por jogo
 2) Admin > Google Chat > Distribuição placares
 
+Por padrão, a tabela de Palpites por jogo envia somente palpites completos,
+sem participantes pendentes. Use --prediction-filter all apenas se quiser incluir pendentes.
+
 O script é seguro: por padrão ele só lê Supabase. Ele só grava na tabela
 public.chat_reminders_sent para não reenviar o mesmo aviso várias vezes.
 
@@ -1275,7 +1278,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--space", type=str, default=None, help="Space do Google Chat. Aceita AAQ... ou spaces/AAQ...")
     parser.add_argument("--fake-game", action="store_true", help="Cria um jogo fake em memória para testar sem mexer no Supabase.")
     parser.add_argument("--kind", choices=["both", "palpites", "distribuicao"], default="both", help="Qual mensagem enviar.")
-    parser.add_argument("--prediction-filter", choices=["all", "complete", "pending"], default="all", help="Filtro da tabela de palpites.")
+    parser.add_argument("--prediction-filter", choices=["all", "complete", "pending"], default="complete", help="Filtro da tabela de palpites. Default: complete, para enviar somente palpites preenchidos.")
     parser.add_argument("--exclude-users", type=str, default=None, help="Usuários a excluir, separados por vírgula. Default: não exclui ninguém.")
 
     return parser

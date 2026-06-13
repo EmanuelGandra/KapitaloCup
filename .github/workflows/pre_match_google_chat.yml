@@ -84,5 +84,5 @@ jobs:
             --early-window-minutes 7 \
             --late-window-minutes 30 \
             --post-kickoff-grace-minutes 3 \
-            --prediction-filter all \
+            --prediction-filter complete \
             --list-next 8
