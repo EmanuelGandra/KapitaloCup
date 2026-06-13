@@ -1,0 +1,88 @@
+name: Pre-match Google Chat reminders
+
+on:
+  schedule:
+    # GitHub Actions usa cron em UTC. Rodar a cada 5 minutos é o menor intervalo suportado.
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "send envia no Chat; dry-run só testa e imprime logs"
+        required: true
+        default: "dry-run"
+        type: choice
+        options:
+          - dry-run
+          - send
+      match_id:
+        description: "Opcional: força um match_id específico, ex: GD-01"
+        required: false
+        default: ""
+      kind:
+        description: "O que enviar"
+        required: true
+        default: "both"
+        type: choice
+        options:
+          - both
+          - palpites
+          - distribuicao
+
+concurrency:
+  group: pre-match-google-chat-reminders
+  cancel-in-progress: false
+
+jobs:
+  send-pre-match-reminders:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      TZ: America/Sao_Paulo
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      GOOGLE_CHAT_SPACE_ID: ${{ secrets.GOOGLE_CHAT_SPACE_ID }}
+      GOOGLE_CHAT_CLIENT_SECRET_JSON: ${{ secrets.GOOGLE_CHAT_CLIENT_SECRET_JSON }}
+      GOOGLE_CHAT_TOKEN_JSON: ${{ secrets.GOOGLE_CHAT_TOKEN_JSON }}
+      KICKOFF_SOURCE_TIMEZONE: America/Sao_Paulo
+      MANUAL_MODE: ${{ github.event.inputs.mode || 'send' }}
+      MANUAL_MATCH_ID: ${{ github.event.inputs.match_id || '' }}
+      MANUAL_KIND: ${{ github.event.inputs.kind || 'both' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements_google_chat_automation.txt
+
+      - name: Run pre-match reminder bot
+        shell: bash
+        run: |
+          MODE_ARG="--send"
+          if [ "$MANUAL_MODE" = "dry-run" ]; then
+            MODE_ARG="--dry-run"
+          fi
+
+          MATCH_ARG=""
+          if [ -n "$MANUAL_MATCH_ID" ]; then
+            MATCH_ARG="--match-id $MANUAL_MATCH_ID --force"
+          fi
+
+          python send_pre_match_google_chat_centralizado.py \
+            $MODE_ARG \
+            $MATCH_ARG \
+            --kind "$MANUAL_KIND" \
+            --minutes-before 30 \
+            --early-window-minutes 7 \
+            --late-window-minutes 30 \
+            --post-kickoff-grace-minutes 3 \
+            --prediction-filter all \
+            --list-next 8
