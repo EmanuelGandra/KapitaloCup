@@ -2283,7 +2283,6 @@ def build_pending_knockout_chat_text(selected_stage: str, summary: dict) -> str:
         "🏆 Kapitalo Cup\n\n"
         f"Pendências do mata-mata — {selected_stage}\n"
         f"Escopo: {scope}.\n"
-        "Admin removido da conta.\n\n"
         f"Usuários com tudo completo: {summary.get('complete_users', 0)}\n"
         f"Usuários pendentes: {summary.get('pending_users', 0)}\n"
         f"Jogos considerados: {summary.get('total_matches', 0)}\n\n"
