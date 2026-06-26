@@ -962,7 +962,6 @@ def next_open_lock_info() -> tuple[str, pd.Timestamp] | None:
     """Próximo prazo aberto.
 
     Considera prazos por fase e também overrides por jogo em public.matches.prediction_lock_at.
-    Retorna sempre um label amigável para aparecer na interface.
     """
     now = now_app_tz()
     future_rows = []
@@ -970,28 +969,18 @@ def next_open_lock_info() -> tuple[str, pd.Timestamp] | None:
     for lock_key in DEFAULT_STAGE_LOCKS:
         lock_at = get_stage_lock_at(lock_key)
         if lock_at > now:
-            future_rows.append((get_lock_label_from_key(lock_key), lock_at))
+            future_rows.append((lock_key, lock_at))
 
     try:
         matches = load_table("matches", order_by="match_no")
         if not matches.empty:
             for _, row in matches.iterrows():
                 lock_at = get_match_lock_at(row)
-                if lock_at <= now:
-                    continue
-
-                stage_label = get_lock_label_from_key(
-                    get_stage_lock_key(row.get("stage", ""))
-                )
-                home_team = str(row.get("home_team", "") or "").strip()
-                away_team = str(row.get("away_team", "") or "").strip()
-
-                if home_team and away_team:
-                    label = f"{stage_label}: {home_team} x {away_team}"
-                else:
-                    label = stage_label
-
-                future_rows.append((label, lock_at))
+                if lock_at > now:
+                    match_id = str(row.get("match_id", ""))
+                    label = match_id or get_lock_label_from_key(
+                        get_stage_lock_key(row.get("stage", "")))
+                    future_rows.append((label, lock_at))
     except Exception:
         pass
 
@@ -2144,6 +2133,254 @@ def build_pending_extras_summary_table() -> pd.DataFrame:
     return out.sort_values(["Pendências", "Usuário"], ascending=[False, True]).reset_index(drop=True)
 
 
+def is_prediction_complete_for_match(pred_row, match: dict) -> bool:
+    """Define se um palpite está completo para fins de pendência no Google Chat.
+
+    Para mata-mata, completo significa ter placar e classificado salvo.
+    Isso evita contar como completo um jogo que tem placar mas não tem predictions.advancing_team.
+    """
+    if pred_row is None:
+        return False
+
+    home_goals = pred_row.get("home_goals")
+    away_goals = pred_row.get("away_goals")
+
+    if home_goals is None or away_goals is None or pd.isna(home_goals) or pd.isna(away_goals):
+        return False
+
+    try:
+        int(home_goals)
+        int(away_goals)
+    except Exception:
+        return False
+
+    if is_knockout_stage(match.get("stage", "")):
+        advancing_team = str(pred_row.get("advancing_team") or "").strip()
+        return bool(advancing_team)
+
+    return True
+
+
+def get_non_admin_profiles() -> pd.DataFrame:
+    """Perfis de participantes, excluindo o administrador configurado."""
+    profiles = load_table("profiles")
+    if profiles.empty or "username" not in profiles.columns:
+        return pd.DataFrame(columns=["id", "username"])
+
+    admin_username = get_admin_user()
+    out = profiles.copy()
+    out["username_norm"] = out["username"].astype(str).str.strip().str.lower()
+    out = out[out["username_norm"] != admin_username].copy()
+    out = out.drop(columns=["username_norm"], errors="ignore")
+    return out.sort_values("username").reset_index(drop=True)
+
+
+def build_prediction_lookup(predictions: pd.DataFrame) -> dict[tuple[str, str], dict]:
+    """Lookup rápido por (user_id, match_id)."""
+    lookup: dict[tuple[str, str], dict] = {}
+
+    if predictions.empty or not {"user_id", "match_id"}.issubset(predictions.columns):
+        return lookup
+
+    for _, row in predictions.iterrows():
+        key = (str(row.get("user_id")), str(row.get("match_id")))
+        if key not in lookup:
+            lookup[key] = row.to_dict()
+
+    return lookup
+
+
+def build_pending_knockout_predictions_summary_table(
+    selected_stage: str,
+    only_open_matches: bool = True,
+) -> tuple[pd.DataFrame, dict]:
+    """Usuários pendentes de completar jogos do mata-mata, excluindo o admin."""
+    profiles = get_non_admin_profiles()
+    matches = sort_matches_for_display(
+        load_table("matches", order_by="match_no"))
+    predictions = load_table("predictions")
+
+    summary = {
+        "stage": selected_stage,
+        "only_open_matches": only_open_matches,
+        "participants": 0,
+        "total_matches": 0,
+        "complete_users": 0,
+        "pending_users": 0,
+    }
+
+    columns = ["Usuário", "Jogos preenchidos",
+               "Jogos pendentes", "Total jogos", "Pendentes"]
+
+    if profiles.empty or matches.empty or "stage" not in matches.columns:
+        return pd.DataFrame(columns=columns), summary
+
+    knockout_matches = matches[matches.apply(
+        lambda row: is_knockout_stage(row.get("stage", "")), axis=1)].copy()
+    knockout_matches = knockout_matches[knockout_matches["stage"].astype(
+        str) == str(selected_stage)].copy()
+
+    if only_open_matches and not knockout_matches.empty:
+        knockout_matches = knockout_matches[[not is_match_locked(
+            row) for _, row in knockout_matches.iterrows()]].copy()
+
+    knockout_matches = sort_matches_for_display(knockout_matches)
+    total_matches = len(knockout_matches)
+
+    summary["participants"] = len(profiles)
+    summary["total_matches"] = total_matches
+
+    if total_matches == 0:
+        return pd.DataFrame(columns=columns), summary
+
+    pred_lookup = build_prediction_lookup(predictions)
+    rows = []
+
+    for _, user in profiles.iterrows():
+        user_id = str(user.get("id"))
+        username = user.get("username", "")
+        complete_count = 0
+        pending_labels = []
+
+        for _, match in knockout_matches.iterrows():
+            match_id = str(match.get("match_id", ""))
+            pred_row = pred_lookup.get((user_id, match_id))
+
+            if is_prediction_complete_for_match(pred_row, match.to_dict()):
+                complete_count += 1
+            else:
+                pending_labels.append(
+                    f"{format_kickoff(match.get('kickoff_at'))} — {match.get('home_team', '')} x {match.get('away_team', '')}"
+                )
+
+        pending_count = total_matches - complete_count
+        if pending_count > 0:
+            rows.append(
+                {
+                    "Usuário": username,
+                    "Jogos preenchidos": complete_count,
+                    "Jogos pendentes": pending_count,
+                    "Total jogos": total_matches,
+                    "Pendentes": "; ".join(pending_labels[:8]) + ("; ..." if len(pending_labels) > 8 else ""),
+                }
+            )
+        else:
+            summary["complete_users"] += 1
+
+    summary["pending_users"] = len(rows)
+
+    out = pd.DataFrame(rows, columns=columns)
+    if out.empty:
+        return out, summary
+
+    return out.sort_values(["Jogos pendentes", "Usuário"], ascending=[False, True]).reset_index(drop=True), summary
+
+
+def build_pending_knockout_chat_text(selected_stage: str, summary: dict) -> str:
+    scope = "jogos abertos" if summary.get(
+        "only_open_matches") else "todos os jogos cadastrados"
+    return (
+        "🏆 Kapitalo Cup\n\n"
+        f"Pendências do mata-mata — {selected_stage}\n"
+        f"Escopo: {scope}.\n"
+        "Admin removido da conta.\n\n"
+        f"Usuários com tudo completo: {summary.get('complete_users', 0)}\n"
+        f"Usuários pendentes: {summary.get('pending_users', 0)}\n"
+        f"Jogos considerados: {summary.get('total_matches', 0)}\n\n"
+        "A tabela mostra somente quem ainda precisa completar placar e classificado."
+    )
+
+
+def build_match_completion_status_table(match_id: str) -> tuple[pd.DataFrame, dict, dict]:
+    """Status de preenchimento de um jogo específico, excluindo o admin."""
+    profiles = get_non_admin_profiles()
+    matches = sort_matches_for_display(
+        load_table("matches", order_by="match_no"))
+    predictions = load_table("predictions")
+
+    columns = ["Status", "Usuário", "Palpite", "Classificado"]
+    summary = {
+        "participants": 0,
+        "complete_users": 0,
+        "pending_users": 0,
+    }
+
+    if profiles.empty or matches.empty or "match_id" not in matches.columns:
+        return pd.DataFrame(columns=columns), {}, summary
+
+    match_rows = matches[matches["match_id"].astype(
+        str) == str(match_id)].copy()
+    if match_rows.empty:
+        return pd.DataFrame(columns=columns), {}, summary
+
+    match = match_rows.iloc[0].to_dict()
+    pred_lookup = build_prediction_lookup(predictions)
+
+    rows = []
+    complete_users = 0
+
+    for _, user in profiles.iterrows():
+        user_id = str(user.get("id"))
+        username = user.get("username", "")
+        pred_row = pred_lookup.get((user_id, str(match_id)))
+        is_complete = is_prediction_complete_for_match(pred_row, match)
+
+        if is_complete:
+            complete_users += 1
+            home_goals = safe_int(pred_row.get("home_goals"))
+            away_goals = safe_int(pred_row.get("away_goals"))
+            palpite = f"{home_goals} x {away_goals}"
+            classificado = pred_row.get("advancing_team") or ""
+            status = "Completo"
+        else:
+            palpite = "Pendente"
+            classificado = "Pendente" if is_knockout_stage(
+                match.get("stage", "")) else "—"
+            status = "Pendente"
+
+        rows.append(
+            {
+                "Status": status,
+                "Usuário": username,
+                "Palpite": palpite,
+                "Classificado": classificado,
+            }
+        )
+
+    summary["participants"] = len(profiles)
+    summary["complete_users"] = complete_users
+    summary["pending_users"] = len(profiles) - complete_users
+
+    out = pd.DataFrame(rows, columns=columns)
+    if out.empty:
+        return out, match, summary
+
+    out["_ordem"] = out["Status"].map({"Pendente": 0, "Completo": 1}).fillna(2)
+    out = out.sort_values(["_ordem", "Usuário"], ascending=[
+                          True, True]).drop(columns=["_ordem"])
+    return out.reset_index(drop=True), match, summary
+
+
+def build_match_completion_chat_text(match: dict, summary: dict) -> str:
+    home_team = match.get("home_team", "")
+    away_team = match.get("away_team", "")
+    stage = match.get("stage", "")
+    kickoff_text = format_kickoff(match.get("kickoff_at"))
+    lock_text = match_lock_text(match)
+
+    return (
+        "🏆 Kapitalo Cup\n\n"
+        f"Status de preenchimento — {home_team} x {away_team}\n"
+        f"Fase: {stage}\n"
+        f"Horário: {kickoff_text}\n"
+        f"Prazo: {lock_text}\n"
+        "Admin removido da conta.\n\n"
+        f"Completaram: {summary.get('complete_users', 0)} de {summary.get('participants', 0)}\n"
+        f"Pendentes: {summary.get('pending_users', 0)}\n\n"
+        "A tabela mostra quem já completou e quem ainda está pendente."
+    )
+
+
 def build_bonus_predictions_all_users_table() -> pd.DataFrame:
     """Tabela com campeão e artilheiro escolhidos por todos os usuários.
 
@@ -2580,6 +2817,8 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
         tab_ranking_chat,
         tab_bonus_dist_chat,
         tab_pending_chat,
+        tab_pending_knockout_chat,
+        tab_match_completion_chat,
         tab_bonus_chat,
     ) = st.tabs(
         [
@@ -2589,6 +2828,8 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
             "Ranking atualizado",
             "Distribuição extras",
             "Pendências placares",
+            "Pendências mata-mata",
+            "Status por jogo",
             "Pendências extras",
         ]
     )
@@ -2843,6 +3084,139 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
                 st.success("Pendências enviadas para o Google Chat.")
             except Exception as exc:
                 st.error(f"Erro ao enviar pendências para Google Chat: {exc}")
+
+    with tab_pending_knockout_chat:
+        st.markdown("#### Enviar pendências do mata-mata")
+        st.caption(
+            "Mostra somente participantes pendentes de completar placar e classificado em jogos do mata-mata. "
+            "O usuário admin é excluído da conta."
+        )
+
+        schedule_matches = sort_matches_for_display(matches)
+        knockout_matches = schedule_matches[schedule_matches.apply(
+            lambda row: is_knockout_stage(row.get("stage", "")), axis=1)].copy()
+
+        if knockout_matches.empty:
+            st.info("Nenhum jogo de mata-mata encontrado.")
+        else:
+            knockout_stages = knockout_matches["stage"].dropna(
+            ).drop_duplicates().tolist()
+            selected_knockout_stage = st.selectbox(
+                "Fase do mata-mata",
+                knockout_stages,
+                index=get_default_stage_index(
+                    knockout_stages, preferred_key="r32"),
+                key="chat_pending_knockout_stage",
+            )
+            only_open_matches = st.checkbox(
+                "Considerar somente jogos abertos",
+                value=True,
+                key="chat_pending_knockout_only_open",
+                help="Se marcado, jogos já travados pelo prazo efetivo não entram na conta de pendências.",
+            )
+
+            pending_knockout_view, pending_knockout_summary = build_pending_knockout_predictions_summary_table(
+                selected_knockout_stage,
+                only_open_matches=only_open_matches,
+            )
+
+            m1, m2, m3 = st.columns(3)
+            with m1:
+                metric_box("Usuários completos", str(
+                    pending_knockout_summary.get("complete_users", 0)))
+            with m2:
+                metric_box("Usuários pendentes", str(
+                    pending_knockout_summary.get("pending_users", 0)))
+            with m3:
+                metric_box("Jogos considerados", str(
+                    pending_knockout_summary.get("total_matches", 0)))
+
+            st.markdown("##### Prévia das pendências")
+            if pending_knockout_view.empty:
+                st.success("Ninguém está pendente neste recorte.")
+            else:
+                st.dataframe(
+                    pending_knockout_view, use_container_width=True, hide_index=True, height=420)
+
+            chat_text = build_pending_knockout_chat_text(
+                selected_knockout_stage, pending_knockout_summary)
+            with st.expander("Prévia da mensagem"):
+                st.text(chat_text)
+
+            if st.button(
+                "Enviar pendências do mata-mata para Google Chat",
+                key="send_pending_knockout_chat",
+                use_container_width=True,
+                disabled=not config_ok or pending_knockout_view.empty,
+            ):
+                try:
+                    scope = "jogos abertos" if only_open_matches else "todos os jogos cadastrados"
+                    image_path = dataframe_to_png(
+                        pending_knockout_view,
+                        title=f"Pendências do mata-mata — {selected_knockout_stage}",
+                        subtitle=f"Escopo: {scope} • Admin excluído",
+                        max_rows=None,
+                        max_fig_height=32,
+                    )
+                    send_google_chat_image(chat_text, image_path)
+                    st.success(
+                        "Pendências do mata-mata enviadas para o Google Chat.")
+                except Exception as exc:
+                    st.error(f"Erro ao enviar pendências do mata-mata: {exc}")
+
+    with tab_match_completion_chat:
+        st.markdown("#### Enviar status de preenchimento de um jogo")
+        st.caption(
+            "Use esta aba para exceções de prazo, como R32-01. "
+            "O menu permite escolher qualquer jogo e reutilizar nas próximas fases. O admin é excluído da conta."
+        )
+
+        selected_match_id, match_info = render_chat_match_selector(
+            matches, "chat_match_completion")
+        if selected_match_id:
+            completion_view, completion_match, completion_summary = build_match_completion_status_table(
+                selected_match_id)
+
+            cm1, cm2, cm3 = st.columns(3)
+            with cm1:
+                metric_box(
+                    "Completaram", f"{completion_summary.get('complete_users', 0)}/{completion_summary.get('participants', 0)}")
+            with cm2:
+                metric_box("Pendentes", str(
+                    completion_summary.get("pending_users", 0)))
+            with cm3:
+                metric_box("Jogo", str(selected_match_id))
+
+            st.markdown("##### Prévia do status")
+            st.dataframe(completion_view, use_container_width=True,
+                         hide_index=True, height=420)
+
+            chat_text = build_match_completion_chat_text(
+                completion_match, completion_summary)
+            with st.expander("Prévia da mensagem"):
+                st.text(chat_text)
+
+            if st.button(
+                "Enviar status deste jogo para Google Chat",
+                key="send_match_completion_chat",
+                use_container_width=True,
+                disabled=not config_ok or completion_view.empty,
+            ):
+                try:
+                    image_path = dataframe_to_png(
+                        completion_view,
+                        title=f"Status — {completion_match.get('home_team', '')} x {completion_match.get('away_team', '')}",
+                        subtitle=(
+                            f"{completion_match.get('stage', '')} • "
+                            f"Completaram: {completion_summary.get('complete_users', 0)} de {completion_summary.get('participants', 0)} • Admin excluído"
+                        ),
+                        max_rows=None,
+                        max_fig_height=32,
+                    )
+                    send_google_chat_image(chat_text, image_path)
+                    st.success("Status do jogo enviado para o Google Chat.")
+                except Exception as exc:
+                    st.error(f"Erro ao enviar status do jogo: {exc}")
 
     with tab_bonus_chat:
         st.markdown("#### Enviar pendências de extras")
@@ -3178,7 +3552,8 @@ def render_logged_sidebar():
         else:
             next_key, next_at = next_lock
             st.info(
-                f"Próximo prazo: {next_key} até {next_at.strftime('%d/%m/%Y %H:%M')}.")
+                f"Próximo prazo: {get_lock_label_from_key(next_key)} até {next_at.strftime('%d/%m/%Y %H:%M')}.")
+
         if st.button("Sair", key="btn_logout", use_container_width=True):
             logout()
             st.session_state.pop("main_menu", None)
@@ -3258,8 +3633,7 @@ def render_home_page():
             metric_box("Próximo prazo", "Todos travados")
         else:
             next_key, next_at = next_lock
-            # metric_box("Próximo prazo", get_lock_label_from_key(next_key))
-            metric_box("Próximo prazo", next_key)
+            metric_box("Próximo prazo", get_lock_label_from_key(next_key))
 
     if next_lock is None:
         st.warning(
@@ -3267,7 +3641,7 @@ def render_home_page():
     else:
         next_key, next_at = next_lock
         st.success(
-            f"Próximo fechamento: {next_key} em {next_at.strftime('%d/%m/%Y %H:%M')}."
+            f"Próximo fechamento: {get_lock_label_from_key(next_key)} em {next_at.strftime('%d/%m/%Y %H:%M')}."
         )
 
     with st.expander("Ver prazos por fase", expanded=True):
@@ -4181,11 +4555,6 @@ def render_knockout_predictions_fast(
     Regra de classificado:
     - Se houver vencedor no placar, o classificado é salvo automaticamente.
     - Se o placar estiver empatado, o usuário precisa escolher quem passa.
-
-    Regras de salvamento:
-    - Cada confronto tem um botão individual para salvar somente aquele jogo.
-    - O botão geral só salva quando todos os jogos abertos da tela estiverem completos.
-    - Jogos travados ficam desabilitados e são ignorados no salvamento geral.
     """
     stage_matches = sort_matches_for_display(
         matches[matches["stage"].astype(str) == str(selected_stage)].copy()
@@ -4254,9 +4623,6 @@ def render_knockout_predictions_fast(
 
     invalid_rows: list[str] = []
     payload_rows: list[dict] = []
-    single_invalid_by_match: dict[str, str] = {}
-    single_payload_by_match: dict[str, dict] = {}
-    single_submit_match_id: str | None = None
     visible_open_count = int(sum(not is_match_locked(row)
                              for _, row in visible_matches.iterrows()))
 
@@ -4298,9 +4664,8 @@ def render_knockout_predictions_fast(
                 f"  \n{kickoff_text} • Jogo {match_no} • {lock_badge} até {lock_text}"
             )
 
-            c_home, c_hg, c_x, c_ag, c_away, c_adv, c_save = st.columns(
-                [2.25, 0.75, 0.16, 0.75, 2.25, 2.0, 1.45]
-            )
+            c_home, c_hg, c_x, c_ag, c_away, c_adv = st.columns(
+                [2.4, 0.8, 0.18, 0.8, 2.4, 2.2])
 
             with c_home:
                 st.markdown(
@@ -4371,102 +4736,56 @@ def render_knockout_predictions_fast(
 
                 st.caption(f"Classificado a salvar: {preview_adv}")
 
-            with c_save:
-                st.markdown("<br>", unsafe_allow_html=True)
-                save_this_match = st.form_submit_button(
-                    "Salvar só este jogo",
-                    key=f"ko_save_one_{match_id}",
-                    use_container_width=True,
-                    disabled=match_locked,
-                )
-                if save_this_match:
-                    single_submit_match_id = match_id
-
             if match_locked:
                 st.divider()
                 continue
 
             label = f"{kickoff_text} — {home_team} x {away_team}"
-            row_invalid: str | None = None
-            row_payload: dict | None = None
 
             if home_value is None or away_value is None:
-                row_invalid = f"{label} — preencha o placar"
                 invalid_rows.append(label)
-            else:
-                final_advancing = infer_advancing_team(
-                    home_team,
-                    away_team,
-                    home_value,
-                    away_value,
-                    selected_adv,
-                )
+                st.divider()
+                continue
 
-                if not final_advancing:
-                    row_invalid = f"{label} — escolha classificado no empate"
-                    invalid_rows.append(row_invalid)
-                else:
-                    row_payload = {
-                        "user_id": user_id,
-                        "match_id": match_id,
-                        "home_goals": int(home_value),
-                        "away_goals": int(away_value),
-                        "advancing_team": final_advancing,
-                    }
-                    payload_rows.append(row_payload)
+            final_advancing = infer_advancing_team(
+                home_team,
+                away_team,
+                home_value,
+                away_value,
+                selected_adv,
+            )
 
-            if row_invalid:
-                single_invalid_by_match[match_id] = row_invalid
-            if row_payload:
-                single_payload_by_match[match_id] = row_payload
+            if not final_advancing:
+                invalid_rows.append(
+                    label + " — escolha classificado no empate")
+                st.divider()
+                continue
+
+            payload_rows.append(
+                {
+                    "user_id": user_id,
+                    "match_id": match_id,
+                    "home_goals": int(home_value),
+                    "away_goals": int(away_value),
+                    "advancing_team": final_advancing,
+                }
+            )
 
             st.divider()
 
-        submitted_all = st.form_submit_button(
-            f"Salvar todos os jogos abertos desta tela ({visible_open_count} jogos)",
+        submitted = st.form_submit_button(
+            f"Salvar jogos abertos desta página ({visible_open_count} jogos)",
             use_container_width=True,
             disabled=visible_open_count == 0,
         )
 
-    if single_submit_match_id:
-        if is_match_locked(visible_matches[visible_matches["match_id"].astype(str) == single_submit_match_id].iloc[0]):
-            st.error("Não é possível alterar este jogo porque o prazo já encerrou.")
-        elif single_submit_match_id in single_invalid_by_match:
-            st.error("Não foi possível salvar este jogo. Revise o preenchimento:")
-            st.dataframe(
-                pd.DataFrame(
-                    {"Jogo para revisar": [single_invalid_by_match[single_submit_match_id]]}),
-                use_container_width=True,
-                hide_index=True,
-            )
-        elif single_submit_match_id in single_payload_by_match:
-            try:
-                supabase.table("predictions").upsert(
-                    [single_payload_by_match[single_submit_match_id]],
-                    on_conflict="user_id,match_id",
-                ).execute()
-                clear_data_cache()
-                st.success(
-                    "Palpite deste jogo salvo com placar e classificado.")
-                st.rerun()
-            except Exception as exc:
-                st.error(f"Erro ao salvar este jogo: {exc}")
-        else:
-            st.warning("Não há dados válidos para salvar neste jogo.")
-
-    if submitted_all:
-        if len(payload_rows) < visible_open_count and not invalid_rows:
-            st.error(
-                "Não foi possível salvar todos os jogos. "
-                "Preencha todos os jogos abertos desta tela antes de usar o botão geral."
-            )
-        else:
-            save_prediction_payloads_or_show_errors(
-                supabase,
-                payload_rows,
-                invalid_rows,
-                "Palpites do mata-mata salvos com placar e classificado.",
-            )
+    if submitted:
+        save_prediction_payloads_or_show_errors(
+            supabase,
+            payload_rows,
+            invalid_rows,
+            "Palpites do mata-mata salvos com placar e classificado.",
+        )
 
     st.markdown("### Conferência rápida dos jogos desta página")
 
