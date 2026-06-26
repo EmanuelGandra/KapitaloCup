@@ -480,47 +480,6 @@ def norm_text(value) -> str:
     return str(value).strip().lower()
 
 
-def normalize_stage_text(value) -> str:
-    """Normaliza textos de fase para comparação robusta.
-
-    Ex.: "16-avos", "16 avos", "16avos" e "Round of 32" devem cair na mesma chave.
-    """
-    text = norm_text(value)
-    text = text.replace("–", "-").replace("—", "-")
-    text = re.sub(r"[_/]+", " ", text)
-    text = re.sub(r"\s*-\s*", "-", text)
-    text = re.sub(r"\s+", " ", text).strip()
-    return text
-
-
-def stage_contains(value: str, *patterns: str) -> bool:
-    """Checa padrões usando versão normalizada e versão sem separadores."""
-    text = normalize_stage_text(value)
-    compact = re.sub(r"[^a-z0-9]+", "", text)
-    for pattern in patterns:
-        p = normalize_stage_text(pattern)
-        pc = re.sub(r"[^a-z0-9]+", "", p)
-        if p and p in text:
-            return True
-        if pc and pc in compact:
-            return True
-    return False
-
-
-def row_to_match_dict(row) -> dict:
-    """Converte Series/dict em dict seguro para funções de lock por jogo."""
-    if row is None:
-        return {}
-    if isinstance(row, dict):
-        return row
-    try:
-        return row.to_dict()
-    except Exception:
-        return {}
-
-
-
-
 def get_match_result_type(home_goals: int, away_goals: int) -> str:
     if home_goals > away_goals:
         return "home"
@@ -555,17 +514,11 @@ def build_prediction_payloads_from_state(visible_prediction_rows: list[dict], us
 
     Usado pelos botões de salvar todos. Valida placares vazios e,
     em mata-mata empatado, exige o classificado.
-
-    Jogos travados são ignorados para permitir salvar os demais jogos abertos
-    da mesma fase.
     """
     invalid_rows = []
     payload_rows = []
 
     for item in visible_prediction_rows:
-        if item.get("locked"):
-            continue
-
         match_id = item["match_id"]
         home_key = f"pred_home_{match_id}"
         away_key = f"pred_away_{match_id}"
@@ -606,6 +559,7 @@ def build_prediction_payloads_from_state(visible_prediction_rows: list[dict], us
         )
 
     return invalid_rows, payload_rows
+
 
 def save_prediction_payloads_or_show_errors(
     supabase,
@@ -653,30 +607,44 @@ def stage_points_for_match(stage: str) -> dict:
     A classificação por fase não é mais escolhida em uma tela separada.
     Em mata-mata, o classificado vem do próprio palpite do jogo.
     """
-    stage_key = get_stage_lock_key(stage)
+    stage = norm_text(stage)
 
-    if stage_key == "groups":
+    if "grupo" in stage or "group" in stage or "primeira" in stage:
         return {"result": 7, "exact": 7, "qualified": 0}
 
-    if stage_key == "r32":
+    if (
+        "dezesseis" in stage
+        or "16 avos" in stage
+        or "16avos" in stage
+        or "round of 32" in stage
+        or "r32" in stage
+        or "32" in stage
+    ):
         return {"result": 10, "exact": 10, "qualified": 10}
 
-    if stage_key == "r16":
+    if (
+        "oitavas" in stage
+        or "8 avos" in stage
+        or "8avos" in stage
+        or "round of 16" in stage
+        or "r16" in stage
+    ):
         return {"result": 12, "exact": 12, "qualified": 12}
 
-    if stage_key == "quarters":
+    if "quartas" in stage or "quarter" in stage:
         return {"result": 15, "exact": 15, "qualified": 15}
 
-    if stage_key == "semis":
+    if "semi" in stage:
         return {"result": 20, "exact": 20, "qualified": 20}
 
-    if stage_key == "third_place":
+    if "3" in stage or "terceiro" in stage or "third" in stage:
         return {"result": 15, "exact": 15, "qualified": 15}
 
-    if stage_key == "final":
+    if "final" in stage:
         return {"result": 25, "exact": 25, "qualified": 25}
 
     return {"result": 0, "exact": 0, "qualified": 0}
+
 
 def points_for_phase_prediction(phase: str) -> int:
     """Mantida por compatibilidade, mas classificações por fase não pontuam mais.
@@ -764,11 +732,8 @@ def get_stage_lock_key(stage_or_phase: str) -> str:
     """
     Converte o nome da fase em uma chave de prazo.
     Serve para jogos e para a aba Classificados e extras.
-
-    Importante: aceita variações como "16-avos", "16 avos", "16avos",
-    "r32" e "Round of 32" como a mesma fase r32.
     """
-    value = normalize_stage_text(stage_or_phase)
+    value = norm_text(stage_or_phase)
 
     if value in {"extras", "bonus", "campeao", "campeão", "artilheiro"}:
         return "extras"
@@ -776,42 +741,39 @@ def get_stage_lock_key(stage_or_phase: str) -> str:
     if is_group_stage(value):
         return "groups"
 
-    if stage_contains(
-        value,
-        "dezesseis",
-        "16-avos",
-        "16 avos",
-        "16avos",
-        "round of 32",
-        "r32",
+    if (
+        "dezesseis" in value
+        or "16 avos" in value
+        or "16avos" in value
+        or "round of 32" in value
+        or "r32" in value
+        or "32" in value
     ):
         return "r32"
 
-    if stage_contains(
-        value,
-        "oitavas",
-        "8-avos",
-        "8 avos",
-        "8avos",
-        "round of 16",
-        "r16",
+    if (
+        "oitavas" in value
+        or "8 avos" in value
+        or "8avos" in value
+        or "round of 16" in value
+        or "r16" in value
     ):
         return "r16"
 
-    if stage_contains(value, "quartas", "quarter", "quarters"):
+    if "quartas" in value or "quarter" in value:
         return "quarters"
 
-    if stage_contains(value, "semi", "semis", "semifinal"):
+    if "semi" in value:
         return "semis"
 
-    if stage_contains(value, "3º", "3o", "terceiro", "third place", "3rd"):
+    if "3" in value or "terceiro" in value or "third" in value:
         return "third_place"
 
-    # "Final" precisa vir depois de semifinal/third place.
-    if stage_contains(value, "final"):
+    if "final" in value:
         return "final"
 
     return "groups"
+
 
 def get_lock_label_from_key(lock_key: str) -> str:
     labels = {
@@ -865,76 +827,6 @@ def stage_lock_text(stage_or_phase: str) -> str:
     return get_stage_lock_at(stage_or_phase).strftime("%d/%m/%Y %H:%M")
 
 
-def get_match_lock_at(match_or_row) -> pd.Timestamp:
-    """Prazo efetivo de um jogo.
-
-    Prioridade:
-    1. public.matches.prediction_lock_at, quando preenchido.
-    2. Prazo padrão da fase via secrets.toml.
-    """
-    match = row_to_match_dict(match_or_row)
-    raw_value = match.get("prediction_lock_at")
-
-    if raw_value is not None and not pd.isna(raw_value) and str(raw_value).strip() != "":
-        try:
-            return parse_app_datetime(raw_value)
-        except Exception:
-            # Se o valor da coluna vier inválido, cai no prazo da fase para não quebrar o app.
-            pass
-
-    return get_stage_lock_at(match.get("stage", ""))
-
-
-def is_match_locked(match_or_row) -> bool:
-    return now_app_tz() >= get_match_lock_at(match_or_row)
-
-
-def match_lock_text(match_or_row) -> str:
-    return get_match_lock_at(match_or_row).strftime("%d/%m/%Y %H:%M")
-
-
-def has_match_lock_override(match_or_row) -> bool:
-    match = row_to_match_dict(match_or_row)
-    raw_value = match.get("prediction_lock_at")
-    return raw_value is not None and not pd.isna(raw_value) and str(raw_value).strip() != ""
-
-
-def match_lock_source_text(match_or_row) -> str:
-    return "Prazo específico do jogo" if has_match_lock_override(match_or_row) else "Prazo padrão da fase"
-
-
-def get_default_stage_index(stages: list[str], preferred_key: str = "r32") -> int:
-    """Escolhe a fase inicial da tela de palpites.
-
-    Preferência: 16-avos quando existir; senão primeira fase aberta; senão primeira da lista.
-    """
-    if not stages:
-        return 0
-
-    for idx, stage in enumerate(stages):
-        if get_stage_lock_key(stage) == preferred_key:
-            return idx
-
-    for idx, stage in enumerate(stages):
-        if not is_stage_locked(stage):
-            return idx
-
-    return 0
-
-
-def stage_has_open_matches(matches: pd.DataFrame, stage: str) -> bool:
-    if matches is None or matches.empty or "stage" not in matches.columns:
-        return False
-
-    rows = matches[matches["stage"].astype(str) == str(stage)].copy()
-    if rows.empty:
-        return False
-
-    return any(not is_match_locked(row) for _, row in rows.iterrows())
-
-
-
-
 def get_prediction_lock_at() -> pd.Timestamp:
     """
     Compatibilidade com versões anteriores.
@@ -960,10 +852,6 @@ def prediction_lock_text() -> str:
 
 
 def next_open_lock_info() -> tuple[str, pd.Timestamp] | None:
-    """Próximo prazo aberto.
-
-    Considera prazos por fase e também overrides por jogo em public.matches.prediction_lock_at.
-    """
     now = now_app_tz()
     future_rows = []
 
@@ -972,22 +860,11 @@ def next_open_lock_info() -> tuple[str, pd.Timestamp] | None:
         if lock_at > now:
             future_rows.append((lock_key, lock_at))
 
-    try:
-        matches = load_table("matches", order_by="match_no")
-        if not matches.empty:
-            for _, row in matches.iterrows():
-                lock_at = get_match_lock_at(row)
-                if lock_at > now:
-                    match_id = str(row.get("match_id", ""))
-                    label = match_id or get_lock_label_from_key(get_stage_lock_key(row.get("stage", "")))
-                    future_rows.append((label, lock_at))
-    except Exception:
-        pass
-
     if not future_rows:
         return None
 
     return sorted(future_rows, key=lambda item: item[1])[0]
+
 
 def build_lock_schedule_df() -> pd.DataFrame:
     now = now_app_tz()
@@ -1027,7 +904,7 @@ def sanitize_sheet_name(name: str) -> str:
 
 
 def is_group_stage(stage: str) -> bool:
-    stage_norm = normalize_stage_text(stage)
+    stage_norm = norm_text(stage)
     return (
         "grupo" in stage_norm
         or "group" in stage_norm
@@ -1035,8 +912,10 @@ def is_group_stage(stage: str) -> bool:
         or "fase de grupos" in stage_norm
     )
 
+
 def is_knockout_stage(stage: str) -> bool:
     return not is_group_stage(stage)
+
 
 def format_kickoff(value) -> str:
     """Formata kickoff_at como horário do Brasil/São Paulo.
@@ -1276,7 +1155,7 @@ def build_missing_items_for_user(user_id: str) -> tuple[pd.DataFrame, pd.DataFra
 
     if matches.empty:
         pending_matches = pd.DataFrame(
-            columns=["Fase", "Grupo", "Horário", "Jogo", "Prazo", "Status prazo", "match_id"])
+            columns=["Fase", "Grupo", "Horário", "Jogo", "match_id"])
     else:
         pred_ids = set()
 
@@ -1300,9 +1179,8 @@ def build_missing_items_for_user(user_id: str) -> tuple[pd.DataFrame, pd.DataFra
                     lambda row: f"{row.get('home_team', '')} x {row.get('away_team', '')}",
                     axis=1,
                 ),
-                "Prazo": missing.apply(lambda row: match_lock_text(row), axis=1),
-                "Tipo de prazo": missing.apply(lambda row: match_lock_source_text(row), axis=1),
-                "Status prazo": missing.apply(lambda row: "Travado" if is_match_locked(row) else "Aberto", axis=1),
+                "Prazo": missing.apply(lambda row: stage_lock_text(row.get("stage", "")), axis=1),
+                "Status prazo": missing.apply(lambda row: "Travado" if is_stage_locked(row.get("stage", "")) else "Aberto", axis=1),
                 "match_id": missing["match_id"] if "match_id" in missing.columns else "",
             }
         )
@@ -1348,6 +1226,7 @@ def build_missing_items_for_user(user_id: str) -> tuple[pd.DataFrame, pd.DataFra
     pending_extras = pd.DataFrame(extras_rows)
 
     return pending_matches.reset_index(drop=True), pending_extras.reset_index(drop=True)
+
 
 def simulate_group_table(group_matches: pd.DataFrame, user_predictions: pd.DataFrame) -> pd.DataFrame:
     """Simula a classificação do grupo sempre com todos os times.
@@ -2200,7 +2079,7 @@ def render_chat_match_selector(matches: pd.DataFrame, key_prefix: str) -> tuple[
     col_stage, col_group = st.columns(2)
 
     with col_stage:
-        selected_stage = st.selectbox("Fase", stages, index=get_default_stage_index(stages, preferred_key="r32"), key=f"{key_prefix}_stage")
+        selected_stage = st.selectbox("Fase", stages, key=f"{key_prefix}_stage")
 
     filtered = schedule_matches[schedule_matches["stage"] == selected_stage].copy()
 
@@ -3592,7 +3471,7 @@ def build_user_template_excel(user_id: str, selected_stage: str | None = None) -
     """Gera um Excel-template para o usuário preencher fora do app e importar de volta.
 
     Quando selected_stage é informado, o template vem apenas com os jogos daquela fase.
-    Só entram jogos ainda abertos pelo prazo efetivo do jogo.
+    Isso é melhor para fases futuras, porque o usuário baixa/preenche só o bloco que está aberto.
     """
     matches = sort_matches_for_display(
         load_table("matches", order_by="match_no"))
@@ -3603,15 +3482,11 @@ def build_user_template_excel(user_id: str, selected_stage: str | None = None) -
         return create_excel_bytes({"Palpites": pd.DataFrame()})
 
     if selected_stage and "stage" in matches.columns:
-        matches = matches[matches["stage"].astype(str) == str(selected_stage)].copy()
-        matches = sort_matches_for_display(matches)
-
-    if not matches.empty:
-        matches = matches[[not is_match_locked(row) for _, row in matches.iterrows()]].copy()
+        matches = matches[matches["stage"] == selected_stage].copy()
         matches = sort_matches_for_display(matches)
 
     if matches.empty:
-        return create_excel_bytes({"Palpites": pd.DataFrame({"Mensagem": ["Nenhum jogo aberto encontrado para esta fase."]})})
+        return create_excel_bytes({"Palpites": pd.DataFrame({"Mensagem": ["Nenhum jogo encontrado para esta fase."]})})
 
     user_predictions = pd.DataFrame()
     if not predictions.empty and "user_id" in predictions.columns:
@@ -3619,7 +3494,7 @@ def build_user_template_excel(user_id: str, selected_stage: str | None = None) -
         )
 
     match_cols = [
-        col for col in ["match_id", "stage", "group_name", "kickoff_at", "home_team", "away_team", "prediction_lock_at"]
+        col for col in ["match_id", "stage", "group_name", "kickoff_at", "home_team", "away_team"]
         if col in matches.columns
     ]
     out = matches[match_cols].copy()
@@ -3634,7 +3509,6 @@ def build_user_template_excel(user_id: str, selected_stage: str | None = None) -
 
     out["Horário"] = out.apply(
         lambda r: format_kickoff(r.get("kickoff_at")), axis=1)
-    out["Prazo"] = out.apply(lambda r: match_lock_text(r), axis=1)
     out = out.rename(
         columns={
             "match_id": "match_id",
@@ -3649,7 +3523,7 @@ def build_user_template_excel(user_id: str, selected_stage: str | None = None) -
     )
 
     ordered = [
-        "match_id", "Fase", "Grupo", "Horário", "Prazo", "Mandante",
+        "match_id", "Fase", "Grupo", "Horário", "Mandante",
         "Gols mandante", "Gols visitante", "Visitante", "Classificado",
     ]
     out = out[[c for c in ordered if c in out.columns]]
@@ -3676,7 +3550,6 @@ def build_user_template_excel(user_id: str, selected_stage: str | None = None) -
                 "Na fase de grupos, deixe Classificado vazio.",
                 "Em mata-mata, se o placar estiver empatado, preencha Classificado com Mandante ou Visitante.",
                 "Não altere a coluna match_id.",
-                "A aba Palpites mostra apenas jogos ainda abertos pelo prazo efetivo do jogo.",
                 "Na aba Extras, preencha Campeão e Artilheiro.",
             ]
         }
@@ -3684,15 +3557,13 @@ def build_user_template_excel(user_id: str, selected_stage: str | None = None) -
 
     return create_excel_bytes({"Palpites": out, "Extras": extras, "Instruções": instrucoes})
 
+
 def predictions_excel_to_payloads(uploaded_file, user_id: str, matches: pd.DataFrame, selected_stage: str | None = None) -> tuple[pd.DataFrame, list[dict], dict, list[str]]:
     """Lê o template importado e transforma em payloads para Supabase.
 
     A leitura é feita linha a linha, sempre usando o match_id da própria linha.
     Isso evita que um valor digitado em uma linha seja reaproveitado por engano
-    para outros jogos.
-
-    Jogos já travados pelo prazo efetivo são ignorados, em vez de bloquear toda
-    a importação.
+    para outros jogos. Se houver qualquer erro, nada é salvo.
     """
     errors: list[str] = []
     payloads: list[dict] = []
@@ -3732,30 +3603,34 @@ def predictions_excel_to_payloads(uploaded_file, user_id: str, matches: pd.DataF
             matches_by_id[str(match.get("match_id")).strip()] = match.to_dict()
 
     def parse_excel_goal_cell(value, row_label: str, col_label: str) -> int | None:
-        """Lê uma célula de gol. Aceita só inteiros 0-20."""
+        """Lê uma célula de gol. Aceita só inteiros 0-20.
+
+        Valores como '2x1', '2-1', 'dois' ou negativos são erro da linha,
+        não são propagados para outros jogos.
+        """
         if value is None or pd.isna(value):
             return None
 
-        text_value = str(value).strip()
-        if text_value == "":
+        text = str(value).strip()
+        if text == "":
             return None
 
         # Excel pode ler 2.0; aceitamos quando é inteiro exato.
         try:
-            number_float = float(text_value.replace(",", "."))
+            number_float = float(text.replace(",", "."))
             if not number_float.is_integer():
                 errors.append(
-                    f"{row_label}: {col_label} precisa ser inteiro. Valor informado: {text_value}")
+                    f"{row_label}: {col_label} precisa ser inteiro. Valor informado: {text}")
                 return None
             number = int(number_float)
         except Exception:
             errors.append(
-                f"{row_label}: {col_label} inválido. Use só um número de 0 a 20. Valor informado: {text_value}")
+                f"{row_label}: {col_label} inválido. Use só um número de 0 a 20. Valor informado: {text}")
             return None
 
         if number < 0 or number > 20:
             errors.append(
-                f"{row_label}: {col_label} fora do intervalo 0-20. Valor informado: {text_value}")
+                f"{row_label}: {col_label} fora do intervalo 0-20. Valor informado: {text}")
             return None
 
         return number
@@ -3788,7 +3663,6 @@ def predictions_excel_to_payloads(uploaded_file, user_id: str, matches: pd.DataF
                     "Fase": stage,
                     "Grupo": match.get("group_name", ""),
                     "Horário": format_kickoff(match.get("kickoff_at")),
-                    "Prazo": match_lock_text(match),
                     "Jogo": f"{home_team} x {away_team}",
                     "Palpite": "",
                     "Classificado": "",
@@ -3796,15 +3670,16 @@ def predictions_excel_to_payloads(uploaded_file, user_id: str, matches: pd.DataF
             )
             continue
 
-        if is_match_locked(match):
+        if is_stage_locked(stage):
+            errors.append(
+                f"{row_label}: fase travada ({stage}). Esse palpite não pode mais ser alterado por importação.")
             preview_rows.append(
                 {
-                    "Status": "Ignorado — prazo encerrado",
+                    "Status": "Fase travada",
                     "match_id": match_id,
                     "Fase": stage,
                     "Grupo": match.get("group_name", ""),
                     "Horário": format_kickoff(match.get("kickoff_at")),
-                    "Prazo": match_lock_text(match),
                     "Jogo": f"{home_team} x {away_team}",
                     "Palpite": "",
                     "Classificado": "",
@@ -3849,7 +3724,6 @@ def predictions_excel_to_payloads(uploaded_file, user_id: str, matches: pd.DataF
                 "Fase": stage,
                 "Grupo": match.get("group_name", ""),
                 "Horário": format_kickoff(match.get("kickoff_at")),
-                "Prazo": match_lock_text(match),
                 "Jogo": f"{home_team} x {away_team}",
                 "Palpite": "" if home_goals is None or away_goals is None else f"{home_goals} x {away_goals}",
                 "Classificado": final_adv or selected_adv,
@@ -3890,11 +3764,12 @@ def predictions_excel_to_payloads(uploaded_file, user_id: str, matches: pd.DataF
     preview = pd.DataFrame(preview_rows)
     return preview, payloads, bonus_payload, errors
 
+
 def render_excel_template_import_page(user_id: str, username: str, supabase, matches: pd.DataFrame):
     st.markdown("### Template em Excel")
     st.caption(
         "Baixe e importe um template de uma fase por vez. "
-        "O template traz somente jogos ainda abertos pelo prazo efetivo do jogo."
+        "Fases já travadas não aparecem para download e também são bloqueadas na importação."
     )
 
     if matches.empty or "stage" not in matches.columns:
@@ -3904,17 +3779,16 @@ def render_excel_template_import_page(user_id: str, username: str, supabase, mat
     all_stages = sort_matches_for_display(
         matches)["stage"].dropna().drop_duplicates().tolist()
     stage_options = [
-        stage for stage in all_stages if stage_has_open_matches(matches, stage)]
+        stage for stage in all_stages if not is_stage_locked(stage)]
 
     if not stage_options:
         st.warning(
-            "Não há jogos abertos para baixar/importar template neste momento.")
+            "Não há fases abertas para baixar/importar template neste momento.")
         return
 
     selected_template_stage = st.selectbox(
         "Template para qual fase aberta?",
         stage_options,
-        index=get_default_stage_index(stage_options, preferred_key="r32"),
         key="template_stage_selector",
     )
 
@@ -3957,55 +3831,39 @@ def render_excel_template_import_page(user_id: str, username: str, supabase, mat
                      use_container_width=True, hide_index=True)
         return
 
-    ignored_count = 0
-    if not preview.empty and "Status" in preview.columns:
-        ignored_count = int(preview["Status"].astype(str).str.contains("Ignorado", case=False, na=False).sum())
-
-    if payloads:
-        st.success(
-            f"Arquivo validado: {len(payloads)} palpites abertos prontos para salvar.")
-    elif ignored_count:
-        st.warning("Todos os jogos do arquivo já estavam com prazo encerrado. Nada de jogos será salvo.")
-    else:
-        st.info("Não há palpites de jogos para salvar.")
-
+    st.success(
+        f"Arquivo validado: {len(payloads)} palpites prontos para salvar.")
     if bonus_payload:
         st.info("O arquivo também contém campeão/artilheiro para salvar.")
 
     if st.button("Salvar importação no app", use_container_width=True, key="save_prediction_template_import"):
         try:
-            safe_payloads = []
             if payloads:
+                # Guarda extra: antes de salvar, confere novamente se nenhum jogo pertence a fase travada.
                 payload_match_ids = {str(item.get("match_id"))
                                      for item in payloads}
-                for item in payloads:
-                    match_rows = matches[matches["match_id"].astype(str) == str(item.get("match_id"))]
-                    if match_rows.empty:
-                        continue
-                    if is_match_locked(match_rows.iloc[0]):
-                        continue
-                    safe_payloads.append(item)
-
-                if safe_payloads:
-                    supabase.table("predictions").upsert(
-                        safe_payloads, on_conflict="user_id,match_id").execute()
-
+                locked_payloads = []
+                for _, mrow in matches[matches["match_id"].astype(str).isin(payload_match_ids)].iterrows():
+                    if is_stage_locked(mrow.get("stage", "")):
+                        locked_payloads.append(
+                            f"{mrow.get('home_team', '')} x {mrow.get('away_team', '')} ({mrow.get('stage', '')})")
+                if locked_payloads:
+                    st.error(
+                        "Importação bloqueada: existem jogos de fase travada no arquivo. Nada foi salvo.")
+                    st.dataframe(pd.DataFrame(
+                        {"Jogos travados": locked_payloads}), use_container_width=True, hide_index=True)
+                    return
+                supabase.table("predictions").upsert(
+                    payloads, on_conflict="user_id,match_id").execute()
             if bonus_payload:
-                if is_stage_locked("extras"):
-                    st.warning("Extras no Excel foram ignorados porque o prazo de extras já encerrou.")
-                else:
-                    supabase.table("bonus_predictions").upsert(
-                        bonus_payload, on_conflict="user_id").execute()
-
-            if not safe_payloads and not bonus_payload:
-                st.warning("Nada foi salvo: não havia palpites abertos no arquivo.")
-                return
-
+                supabase.table("bonus_predictions").upsert(
+                    bonus_payload, on_conflict="user_id").execute()
             clear_data_cache()
             st.success("Importação salva com sucesso.")
             st.rerun()
         except Exception as exc:
             st.error(f"Erro ao salvar importação: {exc}")
+
 
 def build_user_predictions_overview(user_id: str, matches: pd.DataFrame) -> pd.DataFrame:
     predictions = load_table("predictions")
@@ -4037,8 +3895,6 @@ def build_user_predictions_overview(user_id: str, matches: pd.DataFrame) -> pd.D
                 "Fase": row.get("stage", ""),
                 "Grupo": row.get("group_name", ""),
                 "Horário": format_kickoff(row.get("kickoff_at")),
-                "Prazo": match_lock_text(row),
-                "Status prazo": "Travado" if is_match_locked(row) else "Aberto",
                 "Jogo": f"{row.get('home_team', '')} x {row.get('away_team', '')}",
                 "Palpite": "" if not filled else f"{safe_int(hg)} x {safe_int(ag)}",
                 "Classificado": row.get("advancing_team") or "",
@@ -4094,9 +3950,6 @@ def render_grouped_group_predictions(
 
     Funciona para grupos e para mata-mata. Em mata-mata, o classificado é automático
     quando há vencedor; se houver empate, o usuário escolhe quem passa.
-
-    O bloqueio é por jogo: jogos travados ficam desabilitados, mas os demais
-    jogos da mesma fase continuam editáveis.
     """
     stage_matches = sort_matches_for_display(
         matches[matches["stage"] == selected_stage].copy())
@@ -4105,9 +3958,6 @@ def render_grouped_group_predictions(
         return
 
     is_groups = is_group_stage(selected_stage)
-    open_stage_matches = stage_matches[[not is_match_locked(row) for _, row in stage_matches.iterrows()]].copy()
-    open_count = len(open_stage_matches)
-    locked_count = len(stage_matches) - open_count
 
     st.markdown(
         """
@@ -4120,12 +3970,6 @@ def render_grouped_group_predictions(
         """,
         unsafe_allow_html=True,
     )
-
-    if locked_count:
-        st.info(f"{locked_count} jogo(s) desta fase já estão travados e serão ignorados ao salvar em lote.")
-    if open_count == 0:
-        st.warning("Todos os jogos desta fase já estão travados.")
-        return
 
     if is_groups and "group_name" in stage_matches.columns and stage_matches["group_name"].notna().any():
         blocks = sorted(stage_matches["group_name"].dropna().unique().tolist())
@@ -4159,7 +4003,6 @@ def render_grouped_group_predictions(
     payload_rows: list[dict] = []
     all_group_preview: list[tuple[str, pd.DataFrame]] = []
     visible_match_count = 0
-    visible_open_count = 0
 
     with st.form(key=f"grouped_predictions_form_{selected_stage}_{page_number}_{blocks_per_page}"):
         cols = st.columns(2)
@@ -4180,18 +4023,12 @@ def render_grouped_group_predictions(
 
                 for _, match in block_matches.iterrows():
                     visible_match_count += 1
-                    match_locked = is_match_locked(match)
-                    if not match_locked:
-                        visible_open_count += 1
-
                     match_id = str(match.get("match_id", ""))
                     group_match_ids.append(match_id)
                     home_team = match.get("home_team", "")
                     away_team = match.get("away_team", "")
                     kickoff_text = format_kickoff(match.get("kickoff_at"))
                     stage = match.get("stage", selected_stage)
-                    lock_text = match_lock_text(match)
-                    lock_badge = "🔒 Travado" if match_locked else "✅ Aberto"
 
                     existing = pd.DataFrame()
                     if not user_predictions.empty and "match_id" in user_predictions.columns:
@@ -4209,7 +4046,7 @@ def render_grouped_group_predictions(
                         default_adv = existing.iloc[0].get(
                             "advancing_team") or ""
 
-                    st.caption(f"{kickoff_text} • {lock_badge} até {lock_text}")
+                    st.caption(kickoff_text)
                     c_home, c_hg, c_x, c_ag, c_away = st.columns(
                         [2.6, 0.75, 0.15, 0.75, 2.6])
                     with c_home:
@@ -4222,7 +4059,7 @@ def render_grouped_group_predictions(
                             key=f"fast_home_{match_id}",
                             label_visibility="collapsed",
                             max_chars=2,
-                            disabled=match_locked,
+                            disabled=is_stage_locked(stage),
                         )
                     with c_x:
                         st.markdown(
@@ -4234,7 +4071,7 @@ def render_grouped_group_predictions(
                             key=f"fast_away_{match_id}",
                             label_visibility="collapsed",
                             max_chars=2,
-                            disabled=match_locked,
+                            disabled=is_stage_locked(stage),
                         )
                     with c_away:
                         st.markdown(
@@ -4255,7 +4092,7 @@ def render_grouped_group_predictions(
                                 opts,
                                 index=idx_adv,
                                 key=f"fast_adv_{match_id}",
-                                disabled=match_locked,
+                                disabled=is_stage_locked(stage),
                             )
                         elif home_value is not None and away_value is not None:
                             selected_adv = infer_advancing_team(
@@ -4263,9 +4100,6 @@ def render_grouped_group_predictions(
                             st.caption(f"Classificado: {selected_adv}")
                         else:
                             selected_adv = default_adv
-
-                    if match_locked:
-                        continue
 
                     label = f"{kickoff_text} — {home_team} x {away_team}"
                     if home_value is None or away_value is None:
@@ -4304,15 +4138,15 @@ def render_grouped_group_predictions(
             refresh_preview = st.form_submit_button(
                 "↻ Atualizar tabela",
                 use_container_width=True,
-                disabled=visible_open_count == 0,
+                disabled=is_stage_locked(selected_stage),
                 help="Atualiza a classificação simulada com os placares digitados, sem salvar no banco.",
             )
 
         with action_col2:
             submitted = st.form_submit_button(
-                f"Salvar jogos abertos desta view ({visible_open_count} jogos)",
+                f"Salvar todos os jogos desta view ({visible_match_count} jogos)",
                 use_container_width=True,
-                disabled=visible_open_count == 0,
+                disabled=is_stage_locked(selected_stage),
             )
 
     if refresh_preview:
@@ -4331,7 +4165,7 @@ def render_grouped_group_predictions(
             supabase,
             payload_rows,
             invalid_rows,
-            "Palpites dos jogos abertos desta view salvos com sucesso.",
+            "Palpites desta view salvos com sucesso.",
         )
 
     if all_group_preview:
@@ -4344,6 +4178,7 @@ def render_grouped_group_predictions(
                 st.markdown(f"**Grupo {group_name}**")
                 st.dataframe(preview_table, use_container_width=True,
                              hide_index=True, height=180)
+
 
 def render_card_group_predictions(
     user_id: str,
@@ -4373,13 +4208,9 @@ def render_card_group_predictions(
     top_col1, top_col2, top_col3 = st.columns([1.2, 1.2, 1])
 
     with top_col1:
-        selected_stage = st.selectbox(
-            "Fase",
-            stages,
-            index=get_default_stage_index(stages, preferred_key="r32"),
-            key="pred_stage",
-        )
+        selected_stage = st.selectbox("Fase", stages, key="pred_stage")
 
+    selected_stage_locked = is_stage_locked(selected_stage)
     render_stage_lock_message(
         selected_stage, label=f"Fase selecionada — {selected_stage}")
 
@@ -4404,7 +4235,6 @@ def render_card_group_predictions(
         str).tolist()) if "match_id" in filtered.columns else set()
     saved_in_screen = len(saved_ids.intersection(filtered_ids))
     total_in_screen = len(filtered)
-    open_in_screen = int(sum(not is_match_locked(row) for _, row in filtered.iterrows())) if not filtered.empty else 0
 
     with top_col3:
         st.markdown("<br>", unsafe_allow_html=True)
@@ -4412,7 +4242,6 @@ def render_card_group_predictions(
             f"""
             <span class="pill pill-red">{total_in_screen} jogos</span>
             <span class="pill pill-green">{saved_in_screen} salvos</span>
-            <span class="pill">{open_in_screen} abertos</span>
             """,
             unsafe_allow_html=True,
         )
@@ -4426,7 +4255,6 @@ def render_card_group_predictions(
             "home_team": match.get("home_team", ""),
             "away_team": match.get("away_team", ""),
             "match_no": match.get("match_no", ""),
-            "locked": is_match_locked(match),
             "label": (
                 f"{format_kickoff(match.get('kickoff_at'))} — "
                 f"{match.get('home_team', '')} x {match.get('away_team', '')}"
@@ -4442,15 +4270,21 @@ def render_card_group_predictions(
         st.markdown(f"#### Salvar todos os palpites — {save_scope_label}")
         st.caption(
             "Preencha os placares visíveis abaixo e salve tudo de uma vez. "
-            "Jogos já travados são ignorados; se algo aberto estiver incompleto, o app avisa o que falta."
+            "Se algo estiver incompleto, o app só avisa o que falta e mantém a tela aberta."
         )
 
         if st.button(
-            f"Salvar palpites abertos de {save_scope_label}",
+            f"Salvar todos os palpites de {save_scope_label}",
             key=f"save_all_top_{selected_stage}_{selected_group or 'all'}",
             use_container_width=True,
-            disabled=open_in_screen == 0 or filtered.empty,
+            disabled=selected_stage_locked or filtered.empty,
         ):
+            if is_stage_locked(selected_stage):
+                st.error(
+                    f"Não é possível alterar estes jogos. O prazo de {selected_stage} encerrou em {stage_lock_text(selected_stage)}."
+                )
+                return
+
             invalid_rows, payload_rows = build_prediction_payloads_from_state(
                 visible_prediction_rows,
                 user_id,
@@ -4459,7 +4293,7 @@ def render_card_group_predictions(
                 supabase,
                 payload_rows,
                 invalid_rows,
-                f"Palpites abertos de {save_scope_label} foram salvos.",
+                f"Todos os palpites de {save_scope_label} foram salvos.",
             )
 
     if selected_group:
@@ -4475,12 +4309,11 @@ def render_card_group_predictions(
         match_id = match["match_id"]
         match_id_str = str(match_id)
         stage = match.get("stage", selected_stage)
-        match_locked = is_match_locked(match)
+        match_locked = is_stage_locked(stage)
         home_team = match["home_team"]
         away_team = match["away_team"]
         group_name = match.get("group_name", "")
         kickoff_text = format_kickoff(match.get("kickoff_at"))
-        lock_text = match_lock_text(match)
 
         existing = pd.DataFrame()
 
@@ -4507,7 +4340,6 @@ def render_card_group_predictions(
             <div class="match-title">{home_team} x {away_team}</div>
             <div class="match-meta">
                 {kickoff_text} {f"• Grupo {group_name}" if group_name else ""} &nbsp; {lock_badge}
-                &nbsp; Prazo: {lock_text}
             </div>
             """,
             unsafe_allow_html=True,
@@ -4583,9 +4415,9 @@ def render_card_group_predictions(
                 use_container_width=True,
                 disabled=match_locked,
             ):
-                if is_match_locked(match):
+                if is_stage_locked(stage):
                     st.error(
-                        f"Não é possível alterar este jogo. O prazo encerrou em {match_lock_text(match)}.")
+                        f"Não é possível alterar este jogo. O prazo de {stage} encerrou em {stage_lock_text(stage)}.")
                     return
 
                 if home_goals is None or away_goals is None:
@@ -4626,6 +4458,7 @@ def render_card_group_predictions(
         if match_id_str in saved_ids:
             status_pill("Salvo", "green")
 
+
 def render_match_predictions_page():
     if not st.session_state.get("is_logged_in", False):
         st.warning("Você precisa fazer login para registrar palpites.")
@@ -4663,7 +4496,7 @@ def render_match_predictions_page():
         unsafe_allow_html=True,
     )
 
-    with st.expander("Campeão e artilheiro", expanded=False):
+    with st.expander("Campeão e artilheiro", expanded=True):
         render_bonus_predictions_section(
             user_id, teams, supabase, key_suffix="top")
 
@@ -4694,32 +4527,22 @@ def render_match_predictions_page():
         )
 
         selected_stage = st.selectbox(
-            "Fase",
-            stages,
-            index=get_default_stage_index(stages, preferred_key="r32"),
-            key="prediction_stage_main",
-        )
+            "Fase", stages, key="prediction_stage_main")
         render_stage_lock_message(
             selected_stage, label=f"Fase selecionada — {selected_stage}")
-
-        stage_matches = matches[matches["stage"].astype(str) == str(selected_stage)].copy()
-        if not stage_matches.empty:
-            open_count = int(sum(not is_match_locked(row) for _, row in stage_matches.iterrows()))
-            locked_count = len(stage_matches) - open_count
-            st.caption(f"Jogos da fase: {len(stage_matches)} | Abertos: {open_count} | Travados: {locked_count}")
 
         if fill_mode == "Preenchimento agrupado rápido":
             render_grouped_group_predictions(
                 user_id, supabase, matches, user_predictions, selected_stage)
         else:
             # Mantém o modo antigo de cards para revisão jogo a jogo.
-            if "pred_stage" not in st.session_state:
-                st.session_state["pred_stage"] = selected_stage
+            st.session_state["pred_stage"] = selected_stage
             render_card_group_predictions(
                 user_id, username, supabase, matches, user_predictions, teams)
 
     # Botão final de "Salvar todos" removido/comentado a pedido.
     # Mantemos apenas os botões no topo do modo por grupo e no fim do bloco agrupado.
+
 
 def render_predictions_page():
     """Página única de palpites.
