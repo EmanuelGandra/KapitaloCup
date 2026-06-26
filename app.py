@@ -519,6 +519,8 @@ def row_to_match_dict(row) -> dict:
         return {}
 
 
+
+
 def get_match_result_type(home_goals: int, away_goals: int) -> str:
     if home_goals > away_goals:
         return "home"
@@ -605,7 +607,6 @@ def build_prediction_payloads_from_state(visible_prediction_rows: list[dict], us
 
     return invalid_rows, payload_rows
 
-
 def save_prediction_payloads_or_show_errors(
     supabase,
     payload_rows: list[dict],
@@ -676,7 +677,6 @@ def stage_points_for_match(stage: str) -> dict:
         return {"result": 25, "exact": 25, "qualified": 25}
 
     return {"result": 0, "exact": 0, "qualified": 0}
-
 
 def points_for_phase_prediction(phase: str) -> int:
     """Mantida por compatibilidade, mas classificações por fase não pontuam mais.
@@ -813,7 +813,6 @@ def get_stage_lock_key(stage_or_phase: str) -> str:
 
     return "groups"
 
-
 def get_lock_label_from_key(lock_key: str) -> str:
     labels = {
         "groups": "Fase de grupos",
@@ -934,6 +933,8 @@ def stage_has_open_matches(matches: pd.DataFrame, stage: str) -> bool:
     return any(not is_match_locked(row) for _, row in rows.iterrows())
 
 
+
+
 def get_prediction_lock_at() -> pd.Timestamp:
     """
     Compatibilidade com versões anteriores.
@@ -978,8 +979,7 @@ def next_open_lock_info() -> tuple[str, pd.Timestamp] | None:
                 lock_at = get_match_lock_at(row)
                 if lock_at > now:
                     match_id = str(row.get("match_id", ""))
-                    label = match_id or get_lock_label_from_key(
-                        get_stage_lock_key(row.get("stage", "")))
+                    label = match_id or get_lock_label_from_key(get_stage_lock_key(row.get("stage", "")))
                     future_rows.append((label, lock_at))
     except Exception:
         pass
@@ -988,7 +988,6 @@ def next_open_lock_info() -> tuple[str, pd.Timestamp] | None:
         return None
 
     return sorted(future_rows, key=lambda item: item[1])[0]
-
 
 def build_lock_schedule_df() -> pd.DataFrame:
     now = now_app_tz()
@@ -1036,10 +1035,8 @@ def is_group_stage(stage: str) -> bool:
         or "fase de grupos" in stage_norm
     )
 
-
 def is_knockout_stage(stage: str) -> bool:
     return not is_group_stage(stage)
-
 
 def format_kickoff(value) -> str:
     """Formata kickoff_at como horário do Brasil/São Paulo.
@@ -1351,7 +1348,6 @@ def build_missing_items_for_user(user_id: str) -> tuple[pd.DataFrame, pd.DataFra
     pending_extras = pd.DataFrame(extras_rows)
 
     return pending_matches.reset_index(drop=True), pending_extras.reset_index(drop=True)
-
 
 def simulate_group_table(group_matches: pd.DataFrame, user_predictions: pd.DataFrame) -> pd.DataFrame:
     """Simula a classificação do grupo sempre com todos os times.
@@ -1731,8 +1727,7 @@ def dataframe_to_png(
     subtitle_height = 0.32 if subtitle_text else 0
     footer_height = 0.36 if has_footer else 0
     table_height = 0.31 * (n_rows + 1)
-    fig_height = max(1.7, min(max_fig_height, table_height +
-                     title_height + subtitle_height + footer_height + 0.34))
+    fig_height = max(1.7, min(max_fig_height, table_height + title_height + subtitle_height + footer_height + 0.34))
 
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
     ax.axis("off")
@@ -1793,8 +1788,7 @@ def dataframe_to_png(
         "moda kapitalo": default_mode_color,
     }
     if highlight_participants:
-        participant_colors.update(
-            {str(k).casefold(): v for k, v in highlight_participants.items()})
+        participant_colors.update({str(k).casefold(): v for k, v in highlight_participants.items()})
 
     participant_col_idx = None
     for idx, col_name in enumerate(table_df.columns):
@@ -1814,8 +1808,7 @@ def dataframe_to_png(
         row_color = "#f9fafb" if row % 2 == 0 else "#ffffff"
 
         if participant_col_idx is not None and row - 1 < len(table_df):
-            participant = str(
-                table_df.iloc[row - 1, participant_col_idx]).strip().casefold()
+            participant = str(table_df.iloc[row - 1, participant_col_idx]).strip().casefold()
             if participant in participant_colors:
                 row_color = participant_colors[participant]
 
@@ -1858,10 +1851,8 @@ def build_match_mode_row(match_predictions: pd.DataFrame, match: dict) -> dict |
         return None
 
     valid = match_predictions.copy()
-    valid["home_goals_num"] = pd.to_numeric(
-        valid["home_goals"], errors="coerce")
-    valid["away_goals_num"] = pd.to_numeric(
-        valid["away_goals"], errors="coerce")
+    valid["home_goals_num"] = pd.to_numeric(valid["home_goals"], errors="coerce")
+    valid["away_goals_num"] = pd.to_numeric(valid["away_goals"], errors="coerce")
     valid = valid.dropna(subset=["home_goals_num", "away_goals_num"])
 
     if valid.empty:
@@ -1924,7 +1915,6 @@ def build_match_mode_row(match_predictions: pd.DataFrame, match: dict) -> dict |
         "Palpite": palpite_label,
         "Classificado": advancing_label,
     }
-
 
 def build_match_predictions_table(match_id: str, prediction_filter: str = "all") -> tuple[pd.DataFrame, dict]:
     profiles = load_table("profiles")
@@ -2133,6 +2123,8 @@ def build_pending_extras_summary_table() -> pd.DataFrame:
     return out.sort_values(["Pendências", "Usuário"], ascending=[False, True]).reset_index(drop=True)
 
 
+
+
 def is_prediction_complete_for_match(pred_row, match: dict) -> bool:
     """Define se um palpite está completo para fins de pendência no Google Chat.
 
@@ -2196,8 +2188,7 @@ def build_pending_knockout_predictions_summary_table(
 ) -> tuple[pd.DataFrame, dict]:
     """Usuários pendentes de completar jogos do mata-mata, excluindo o admin."""
     profiles = get_non_admin_profiles()
-    matches = sort_matches_for_display(
-        load_table("matches", order_by="match_no"))
+    matches = sort_matches_for_display(load_table("matches", order_by="match_no"))
     predictions = load_table("predictions")
 
     summary = {
@@ -2209,20 +2200,16 @@ def build_pending_knockout_predictions_summary_table(
         "pending_users": 0,
     }
 
-    columns = ["Usuário", "Jogos preenchidos",
-               "Jogos pendentes", "Total jogos", "Pendentes"]
+    columns = ["Usuário", "Jogos preenchidos", "Jogos pendentes", "Total jogos", "Pendentes"]
 
     if profiles.empty or matches.empty or "stage" not in matches.columns:
         return pd.DataFrame(columns=columns), summary
 
-    knockout_matches = matches[matches.apply(
-        lambda row: is_knockout_stage(row.get("stage", "")), axis=1)].copy()
-    knockout_matches = knockout_matches[knockout_matches["stage"].astype(
-        str) == str(selected_stage)].copy()
+    knockout_matches = matches[matches.apply(lambda row: is_knockout_stage(row.get("stage", "")), axis=1)].copy()
+    knockout_matches = knockout_matches[knockout_matches["stage"].astype(str) == str(selected_stage)].copy()
 
     if only_open_matches and not knockout_matches.empty:
-        knockout_matches = knockout_matches[[not is_match_locked(
-            row) for _, row in knockout_matches.iterrows()]].copy()
+        knockout_matches = knockout_matches[[not is_match_locked(row) for _, row in knockout_matches.iterrows()]].copy()
 
     knockout_matches = sort_matches_for_display(knockout_matches)
     total_matches = len(knockout_matches)
@@ -2277,24 +2264,23 @@ def build_pending_knockout_predictions_summary_table(
 
 
 def build_pending_knockout_chat_text(selected_stage: str, summary: dict) -> str:
-    scope = "jogos abertos" if summary.get(
-        "only_open_matches") else "todos os jogos cadastrados"
+    scope = "jogos abertos" if summary.get("only_open_matches") else "todos os jogos cadastrados"
     return (
         "🏆 Kapitalo Cup\n\n"
         f"Pendências do mata-mata — {selected_stage}\n"
         f"Escopo: {scope}.\n"
+        "Admin removido da conta.\n\n"
         f"Usuários com tudo completo: {summary.get('complete_users', 0)}\n"
         f"Usuários pendentes: {summary.get('pending_users', 0)}\n"
         f"Jogos considerados: {summary.get('total_matches', 0)}\n\n"
-        "A tabela mostra somente quem ainda precisa completar placar e classificado nesse jogo."
+        "A tabela mostra somente quem ainda precisa completar placar e classificado."
     )
 
 
 def build_match_completion_status_table(match_id: str) -> tuple[pd.DataFrame, dict, dict]:
     """Status de preenchimento de um jogo específico, excluindo o admin."""
     profiles = get_non_admin_profiles()
-    matches = sort_matches_for_display(
-        load_table("matches", order_by="match_no"))
+    matches = sort_matches_for_display(load_table("matches", order_by="match_no"))
     predictions = load_table("predictions")
 
     columns = ["Status", "Usuário", "Palpite", "Classificado"]
@@ -2307,8 +2293,7 @@ def build_match_completion_status_table(match_id: str) -> tuple[pd.DataFrame, di
     if profiles.empty or matches.empty or "match_id" not in matches.columns:
         return pd.DataFrame(columns=columns), {}, summary
 
-    match_rows = matches[matches["match_id"].astype(
-        str) == str(match_id)].copy()
+    match_rows = matches[matches["match_id"].astype(str) == str(match_id)].copy()
     if match_rows.empty:
         return pd.DataFrame(columns=columns), {}, summary
 
@@ -2333,8 +2318,7 @@ def build_match_completion_status_table(match_id: str) -> tuple[pd.DataFrame, di
             status = "Completo"
         else:
             palpite = "Pendente"
-            classificado = "Pendente" if is_knockout_stage(
-                match.get("stage", "")) else "—"
+            classificado = "Pendente" if is_knockout_stage(match.get("stage", "")) else "—"
             status = "Pendente"
 
         rows.append(
@@ -2355,8 +2339,7 @@ def build_match_completion_status_table(match_id: str) -> tuple[pd.DataFrame, di
         return out, match, summary
 
     out["_ordem"] = out["Status"].map({"Pendente": 0, "Completo": 1}).fillna(2)
-    out = out.sort_values(["_ordem", "Usuário"], ascending=[
-                          True, True]).drop(columns=["_ordem"])
+    out = out.sort_values(["_ordem", "Usuário"], ascending=[True, True]).drop(columns=["_ordem"])
     return out.reset_index(drop=True), match, summary
 
 
@@ -2444,11 +2427,11 @@ def build_bonus_predictions_chat_text() -> str:
     )
 
 
+
 def render_chat_match_selector(matches: pd.DataFrame, key_prefix: str) -> tuple[str | None, dict]:
     """Componente reutilizável para escolher fase/grupo/jogo nas abas do Google Chat."""
     schedule_matches = sort_matches_for_display(matches)
-    stages = schedule_matches["stage"].dropna().unique(
-    ).tolist() if "stage" in schedule_matches.columns else []
+    stages = schedule_matches["stage"].dropna().unique().tolist() if "stage" in schedule_matches.columns else []
 
     if not stages:
         st.info("Nenhuma fase encontrada.")
@@ -2457,23 +2440,18 @@ def render_chat_match_selector(matches: pd.DataFrame, key_prefix: str) -> tuple[
     col_stage, col_group = st.columns(2)
 
     with col_stage:
-        selected_stage = st.selectbox("Fase", stages, index=get_default_stage_index(
-            stages, preferred_key="r32"), key=f"{key_prefix}_stage")
+        selected_stage = st.selectbox("Fase", stages, index=get_default_stage_index(stages, preferred_key="r32"), key=f"{key_prefix}_stage")
 
-    filtered = schedule_matches[schedule_matches["stage"]
-                                == selected_stage].copy()
+    filtered = schedule_matches[schedule_matches["stage"] == selected_stage].copy()
 
     with col_group:
         if "group_name" in filtered.columns and filtered["group_name"].notna().any():
-            groups = ["Todos"] + \
-                sorted(filtered["group_name"].dropna().unique().tolist())
-            selected_group = st.selectbox(
-                "Grupo", groups, key=f"{key_prefix}_group")
+            groups = ["Todos"] + sorted(filtered["group_name"].dropna().unique().tolist())
+            selected_group = st.selectbox("Grupo", groups, key=f"{key_prefix}_group")
             if selected_group != "Todos":
                 filtered = filtered[filtered["group_name"] == selected_group]
         else:
-            st.selectbox("Grupo", ["Não aplicável"],
-                         disabled=True, key=f"{key_prefix}_group_disabled")
+            st.selectbox("Grupo", ["Não aplicável"], disabled=True, key=f"{key_prefix}_group_disabled")
 
     filtered = sort_matches_for_display(filtered)
 
@@ -2494,8 +2472,7 @@ def render_chat_match_selector(matches: pd.DataFrame, key_prefix: str) -> tuple[
         st.info("Nenhum jogo encontrado para esse filtro.")
         return None, {}
 
-    selected_match_label = st.selectbox(
-        "Jogo", match_options, key=f"{key_prefix}_selected")
+    selected_match_label = st.selectbox("Jogo", match_options, key=f"{key_prefix}_selected")
     return match_option_map[selected_match_label], match_info_map[selected_match_label]
 
 
@@ -2509,8 +2486,7 @@ def build_match_score_distribution_table(match_id: str) -> tuple[pd.DataFrame, d
     matches = sort_matches_for_display(matches)
     predictions = load_table("predictions")
 
-    match_rows = matches[matches["match_id"].astype(str) == str(
-        match_id)] if not matches.empty and "match_id" in matches.columns else pd.DataFrame()
+    match_rows = matches[matches["match_id"].astype(str) == str(match_id)] if not matches.empty and "match_id" in matches.columns else pd.DataFrame()
     if match_rows.empty:
         return pd.DataFrame(columns=["Placar", "Qtd", "%"]), {}
 
@@ -2521,8 +2497,7 @@ def build_match_score_distribution_table(match_id: str) -> tuple[pd.DataFrame, d
     if predictions.empty or "match_id" not in predictions.columns:
         return pd.DataFrame(columns=["Placar", "Qtd", "%"]), match
 
-    pred = predictions[predictions["match_id"].astype(
-        str) == str(match_id)].copy()
+    pred = predictions[predictions["match_id"].astype(str) == str(match_id)].copy()
     if pred.empty:
         return pd.DataFrame(columns=["Placar", "Qtd", "%"]), match
 
@@ -2556,21 +2531,17 @@ def distribution_chart_to_png(distribution_df: pd.DataFrame, match: dict) -> str
     try:
         import matplotlib.pyplot as plt
     except Exception as exc:
-        raise RuntimeError(
-            "matplotlib não instalado. Adicione matplotlib ao requirements.txt.") from exc
+        raise RuntimeError("matplotlib não instalado. Adicione matplotlib ao requirements.txt.") from exc
 
-    chart_df = distribution_df.copy() if isinstance(
-        distribution_df, pd.DataFrame) else pd.DataFrame()
+    chart_df = distribution_df.copy() if isinstance(distribution_df, pd.DataFrame) else pd.DataFrame()
     if chart_df.empty:
-        chart_df = pd.DataFrame(
-            {"Placar": ["Sem palpites"], "Qtd": [0], "%": ["0%"]})
+        chart_df = pd.DataFrame({"Placar": ["Sem palpites"], "Qtd": [0], "%": ["0%"]})
 
     chart_df = chart_df.sort_values("Qtd", ascending=True).tail(18)
     height = max(3.2, min(9.5, 0.42 * len(chart_df) + 1.5))
     fig, ax = plt.subplots(figsize=(11, height))
 
-    ax.barh(chart_df["Placar"], chart_df["Qtd"],
-            color=PRIMARY_COLOR, alpha=0.86)
+    ax.barh(chart_df["Placar"], chart_df["Qtd"], color=PRIMARY_COLOR, alpha=0.86)
     ax.set_xlabel("Quantidade de participantes")
     ax.set_ylabel("")
     title = f"Distribuição de palpites — {match.get('home_team', '')} x {match.get('away_team', '')}"
@@ -2579,8 +2550,7 @@ def distribution_chart_to_png(distribution_df: pd.DataFrame, match: dict) -> str
 
     max_qtd = max([1] + [int(x) for x in chart_df["Qtd"].tolist()])
     for i, (_, row) in enumerate(chart_df.iterrows()):
-        ax.text(int(row["Qtd"]) + max_qtd * 0.015, i,
-                f"{row['Qtd']} ({row['%']})", va="center", fontsize=9)
+        ax.text(int(row["Qtd"]) + max_qtd * 0.015, i, f"{row['Qtd']} ({row['%']})", va="center", fontsize=9)
 
     ax.set_xlim(0, max_qtd * 1.22)
     ax.grid(axis="x", alpha=0.22)
@@ -2646,13 +2616,11 @@ def score_prediction_for_match(row: pd.Series, match: dict) -> tuple[int, str]:
 def build_match_points_table(match_id: str) -> tuple[pd.DataFrame, dict]:
     """Tabela com quem pontuou em um jogo e quantos pontos fez."""
     profiles = load_table("profiles")
-    matches = sort_matches_for_display(
-        load_table("matches", order_by="match_no"))
+    matches = sort_matches_for_display(load_table("matches", order_by="match_no"))
     predictions = load_table("predictions")
     actual_results = load_table("actual_results")
 
-    match_rows = matches[matches["match_id"].astype(str) == str(
-        match_id)] if not matches.empty and "match_id" in matches.columns else pd.DataFrame()
+    match_rows = matches[matches["match_id"].astype(str) == str(match_id)] if not matches.empty and "match_id" in matches.columns else pd.DataFrame()
     if match_rows.empty:
         return pd.DataFrame(columns=["Participante", "Palpite", "Resultado", "Pontos", "Como pontuou"]), {}
 
@@ -2663,22 +2631,19 @@ def build_match_points_table(match_id: str) -> tuple[pd.DataFrame, dict]:
     if actual_results.empty or "match_id" not in actual_results.columns:
         return pd.DataFrame(columns=["Participante", "Palpite", "Resultado", "Pontos", "Como pontuou"]), match
 
-    actual = actual_results[actual_results["match_id"].astype(
-        str) == str(match_id)].copy()
+    actual = actual_results[actual_results["match_id"].astype(str) == str(match_id)].copy()
     if actual.empty:
         return pd.DataFrame(columns=["Participante", "Palpite", "Resultado", "Pontos", "Como pontuou"]), match
 
     if predictions.empty or profiles.empty:
         return pd.DataFrame(columns=["Participante", "Palpite", "Resultado", "Pontos", "Como pontuou"]), match
 
-    pred = predictions[predictions["match_id"].astype(
-        str) == str(match_id)].copy()
+    pred = predictions[predictions["match_id"].astype(str) == str(match_id)].copy()
     if pred.empty:
         return pd.DataFrame(columns=["Participante", "Palpite", "Resultado", "Pontos", "Como pontuou"]), match
 
     merged = (
-        pred.merge(actual, on="match_id", suffixes=(
-            "_pred", "_actual"), how="inner")
+        pred.merge(actual, on="match_id", suffixes=("_pred", "_actual"), how="inner")
         .merge(profiles[["id", "username"]], left_on="user_id", right_on="id", how="left")
     )
 
@@ -2702,8 +2667,7 @@ def build_match_points_table(match_id: str) -> tuple[pd.DataFrame, dict]:
             }
         )
 
-    out = pd.DataFrame(rows, columns=[
-                       "Participante", "Palpite", "Resultado", "Pontos", "Como pontuou"])
+    out = pd.DataFrame(rows, columns=["Participante", "Palpite", "Resultado", "Pontos", "Como pontuou"])
     if out.empty:
         return out, match
     return out.sort_values(["Pontos", "Participante"], ascending=[False, True]).reset_index(drop=True), match
@@ -2743,13 +2707,10 @@ def bonus_distribution_chart_to_png(champion_df: pd.DataFrame, scorer_df: pd.Dat
     try:
         import matplotlib.pyplot as plt
     except Exception as exc:
-        raise RuntimeError(
-            "matplotlib não instalado. Adicione matplotlib ao requirements.txt.") from exc
+        raise RuntimeError("matplotlib não instalado. Adicione matplotlib ao requirements.txt.") from exc
 
-    champ = champion_df.copy() if isinstance(champion_df, pd.DataFrame) and not champion_df.empty else pd.DataFrame(
-        {"Nome": ["Sem dados"], "Qtd": [0], "%": ["0%"]})
-    scorer = scorer_df.copy() if isinstance(scorer_df, pd.DataFrame) and not scorer_df.empty else pd.DataFrame(
-        {"Nome": ["Sem dados"], "Qtd": [0], "%": ["0%"]})
+    champ = champion_df.copy() if isinstance(champion_df, pd.DataFrame) and not champion_df.empty else pd.DataFrame({"Nome": ["Sem dados"], "Qtd": [0], "%": ["0%"]})
+    scorer = scorer_df.copy() if isinstance(scorer_df, pd.DataFrame) and not scorer_df.empty else pd.DataFrame({"Nome": ["Sem dados"], "Qtd": [0], "%": ["0%"]})
 
     champ = champ.sort_values("Qtd", ascending=True).tail(12)
     scorer = scorer.sort_values("Qtd", ascending=True).tail(12)
@@ -2765,11 +2726,9 @@ def bonus_distribution_chart_to_png(champion_df: pd.DataFrame, scorer_df: pd.Dat
         max_qtd = max([1] + [int(x) for x in df["Qtd"].tolist()])
         ax.set_xlim(0, max_qtd * 1.25)
         for i, (_, row) in enumerate(df.iterrows()):
-            ax.text(int(row["Qtd"]) + max_qtd * 0.015, i,
-                    f"{row['Qtd']} ({row['%']})", va="center", fontsize=9)
+            ax.text(int(row["Qtd"]) + max_qtd * 0.015, i, f"{row['Qtd']} ({row['%']})", va="center", fontsize=9)
 
-    fig.suptitle("Kapitalo Cup — Distribuição dos extras",
-                 fontweight="bold", y=0.995)
+    fig.suptitle("Kapitalo Cup — Distribuição dos extras", fontweight="bold", y=0.995)
     fig.tight_layout(pad=0.9)
 
     output = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
@@ -2786,7 +2745,6 @@ def build_bonus_distribution_chat_text() -> str:
         "O gráfico mostra a concentração dos palpites de extras cadastrados pelos participantes."
     )
 
-
 def render_google_chat_admin_page(matches: pd.DataFrame):
     st.markdown("### Google Chat")
     st.caption(
@@ -2796,8 +2754,7 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
 
     config_ok, config_msg = google_chat_config_ok()
     if config_ok:
-        st.success(
-            f"Google Chat configurado. Space: {get_google_chat_space_id()}")
+        st.success(f"Google Chat configurado. Space: {get_google_chat_space_id()}")
     else:
         st.warning(config_msg)
         st.info(
@@ -2835,8 +2792,7 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
 
     with tab_match_chat:
         st.markdown("#### Enviar palpites de um jogo")
-        selected_match_id, match_info = render_chat_match_selector(
-            matches, "chat_match")
+        selected_match_id, match_info = render_chat_match_selector(matches, "chat_match")
         if not selected_match_id:
             return
 
@@ -2861,22 +2817,16 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
             selected_match_id,
             prediction_filter=prediction_filter,
         )
-        all_table_df, _ = build_match_predictions_table(
-            selected_match_id, prediction_filter="all")
+        all_table_df, _ = build_match_predictions_table(selected_match_id, prediction_filter="all")
 
         st.markdown("##### Prévia da tabela")
-        st.dataframe(table_df, use_container_width=True,
-                     hide_index=True, height=420)
+        st.dataframe(table_df, use_container_width=True, hide_index=True, height=420)
 
-        pending_count = int((all_table_df["Palpite"] == "Pendente").sum(
-        )) if "Palpite" in all_table_df.columns else 0
-        complete_count = int((all_table_df["Palpite"] != "Pendente").sum(
-        )) if "Palpite" in all_table_df.columns else 0
-        st.caption(
-            f"Filtro da imagem: {prediction_filter_label}. Com palpite: {complete_count} | Pendentes: {pending_count}.")
+        pending_count = int((all_table_df["Palpite"] == "Pendente").sum()) if "Palpite" in all_table_df.columns else 0
+        complete_count = int((all_table_df["Palpite"] != "Pendente").sum()) if "Palpite" in all_table_df.columns else 0
+        st.caption(f"Filtro da imagem: {prediction_filter_label}. Com palpite: {complete_count} | Pendentes: {pending_count}.")
         if pending_count:
-            st.warning(
-                f"Ainda existem {pending_count} participantes sem palpite para este jogo.")
+            st.warning(f"Ainda existem {pending_count} participantes sem palpite para este jogo.")
 
         chat_text = build_match_chat_text(match_info)
         with st.expander("Prévia da mensagem"):
@@ -2907,21 +2857,17 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
 
     with tab_score_dist_chat:
         st.markdown("#### Enviar distribuição dos placares previstos")
-        selected_match_id, match_info = render_chat_match_selector(
-            matches, "chat_score_distribution")
+        selected_match_id, match_info = render_chat_match_selector(matches, "chat_score_distribution")
         if not selected_match_id:
             return
 
-        dist_df, match_info = build_match_score_distribution_table(
-            selected_match_id)
+        dist_df, match_info = build_match_score_distribution_table(selected_match_id)
         st.markdown("##### Prévia da distribuição")
         if dist_df.empty:
             st.info("Ainda não há palpites preenchidos para este jogo.")
         else:
-            st.dataframe(dist_df, use_container_width=True,
-                         hide_index=True, height=360)
-            st.caption(
-                "O placar está sempre escrito como: Time mandante Gols x Gols Time visitante.")
+            st.dataframe(dist_df, use_container_width=True, hide_index=True, height=360)
+            st.caption("O placar está sempre escrito como: Time mandante Gols x Gols Time visitante.")
 
         chat_text = build_match_distribution_chat_text(match_info)
         with st.expander("Prévia da mensagem"):
@@ -2936,26 +2882,22 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
             try:
                 image_path = distribution_chart_to_png(dist_df, match_info)
                 send_google_chat_image(chat_text, image_path)
-                st.success(
-                    "Distribuição de placares enviada para o Google Chat.")
+                st.success("Distribuição de placares enviada para o Google Chat.")
             except Exception as exc:
                 st.error(f"Erro ao enviar distribuição: {exc}")
 
     with tab_match_points_chat:
         st.markdown("#### Enviar quem pontuou em um jogo")
-        selected_match_id, match_info = render_chat_match_selector(
-            matches, "chat_match_points")
+        selected_match_id, match_info = render_chat_match_selector(matches, "chat_match_points")
         if not selected_match_id:
             return
 
         points_df, match_info = build_match_points_table(selected_match_id)
         st.markdown("##### Prévia da pontuação do jogo")
         if points_df.empty:
-            st.info(
-                "Ainda não há resultado oficial cadastrado para este jogo ou ninguém pontuou.")
+            st.info("Ainda não há resultado oficial cadastrado para este jogo ou ninguém pontuou.")
         else:
-            st.dataframe(points_df, use_container_width=True,
-                         hide_index=True, height=420)
+            st.dataframe(points_df, use_container_width=True, hide_index=True, height=420)
 
         chat_text = build_match_points_chat_text(match_info)
         with st.expander("Prévia da mensagem"):
@@ -2970,8 +2912,7 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
             try:
                 title = f"Pontuação — {match_info.get('home_team', '')} x {match_info.get('away_team', '')}"
                 subtitle = f"{match_info.get('stage', '')} • {format_kickoff(match_info.get('kickoff_at'))}"
-                image_path = dataframe_to_png(
-                    points_df, title=title, subtitle=subtitle)
+                image_path = dataframe_to_png(points_df, title=title, subtitle=subtitle)
                 send_google_chat_image(chat_text, image_path)
                 st.success("Pontuação do jogo enviada para o Google Chat.")
             except Exception as exc:
@@ -2992,10 +2933,13 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
             bonus_actuals=data["bonus_actuals"],
         )
 
-        ranking_view = ranking.drop(columns=["user_id"], errors="ignore")
+        ranking_view = build_ranking_chat_view(ranking, data)
         st.markdown("##### Prévia do ranking")
-        st.dataframe(ranking_view, use_container_width=True,
-                     hide_index=True, height=420)
+        st.caption(
+            "Posições empatadas aparecem com o mesmo número. "
+            "As setas ao lado dos nomes comparam a posição atual com a posição antes do último resultado oficial cadastrado."
+        )
+        st.dataframe(ranking_view, use_container_width=True, hide_index=True, height=420)
 
         chat_text = build_ranking_chat_text()
         with st.expander("Prévia da mensagem"):
@@ -3030,15 +2974,13 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
             if champion_df.empty:
                 st.info("Sem campeões preenchidos.")
             else:
-                st.dataframe(champion_df, use_container_width=True,
-                             hide_index=True, height=360)
+                st.dataframe(champion_df, use_container_width=True, hide_index=True, height=360)
         with col2:
             st.markdown("##### Artilheiros")
             if scorer_df.empty:
                 st.info("Sem artilheiros preenchidos.")
             else:
-                st.dataframe(scorer_df, use_container_width=True,
-                             hide_index=True, height=360)
+                st.dataframe(scorer_df, use_container_width=True, hide_index=True, height=360)
 
         chat_text = build_bonus_distribution_chat_text()
         with st.expander("Prévia da mensagem"):
@@ -3051,11 +2993,9 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
             disabled=not config_ok or (champion_df.empty and scorer_df.empty),
         ):
             try:
-                image_path = bonus_distribution_chart_to_png(
-                    champion_df, scorer_df)
+                image_path = bonus_distribution_chart_to_png(champion_df, scorer_df)
                 send_google_chat_image(chat_text, image_path)
-                st.success(
-                    "Distribuição de extras enviada para o Google Chat.")
+                st.success("Distribuição de extras enviada para o Google Chat.")
             except Exception as exc:
                 st.error(f"Erro ao enviar distribuição de extras: {exc}")
 
@@ -3064,8 +3004,7 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
 
         pending_view = build_pending_predictions_summary_table()
         st.markdown("##### Prévia das pendências")
-        st.dataframe(pending_view, use_container_width=True,
-                     hide_index=True, height=420)
+        st.dataframe(pending_view, use_container_width=True, hide_index=True, height=420)
 
         chat_text = build_pending_chat_text()
         with st.expander("Prévia da mensagem"):
@@ -3084,6 +3023,7 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
             except Exception as exc:
                 st.error(f"Erro ao enviar pendências para Google Chat: {exc}")
 
+
     with tab_pending_knockout_chat:
         st.markdown("#### Enviar pendências do mata-mata")
         st.caption(
@@ -3092,19 +3032,16 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
         )
 
         schedule_matches = sort_matches_for_display(matches)
-        knockout_matches = schedule_matches[schedule_matches.apply(
-            lambda row: is_knockout_stage(row.get("stage", "")), axis=1)].copy()
+        knockout_matches = schedule_matches[schedule_matches.apply(lambda row: is_knockout_stage(row.get("stage", "")), axis=1)].copy()
 
         if knockout_matches.empty:
             st.info("Nenhum jogo de mata-mata encontrado.")
         else:
-            knockout_stages = knockout_matches["stage"].dropna(
-            ).drop_duplicates().tolist()
+            knockout_stages = knockout_matches["stage"].dropna().drop_duplicates().tolist()
             selected_knockout_stage = st.selectbox(
                 "Fase do mata-mata",
                 knockout_stages,
-                index=get_default_stage_index(
-                    knockout_stages, preferred_key="r32"),
+                index=get_default_stage_index(knockout_stages, preferred_key="r32"),
                 key="chat_pending_knockout_stage",
             )
             only_open_matches = st.checkbox(
@@ -3121,24 +3058,19 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
 
             m1, m2, m3 = st.columns(3)
             with m1:
-                metric_box("Usuários completos", str(
-                    pending_knockout_summary.get("complete_users", 0)))
+                metric_box("Usuários completos", str(pending_knockout_summary.get("complete_users", 0)))
             with m2:
-                metric_box("Usuários pendentes", str(
-                    pending_knockout_summary.get("pending_users", 0)))
+                metric_box("Usuários pendentes", str(pending_knockout_summary.get("pending_users", 0)))
             with m3:
-                metric_box("Jogos considerados", str(
-                    pending_knockout_summary.get("total_matches", 0)))
+                metric_box("Jogos considerados", str(pending_knockout_summary.get("total_matches", 0)))
 
             st.markdown("##### Prévia das pendências")
             if pending_knockout_view.empty:
                 st.success("Ninguém está pendente neste recorte.")
             else:
-                st.dataframe(
-                    pending_knockout_view, use_container_width=True, hide_index=True, height=420)
+                st.dataframe(pending_knockout_view, use_container_width=True, hide_index=True, height=420)
 
-            chat_text = build_pending_knockout_chat_text(
-                selected_knockout_stage, pending_knockout_summary)
+            chat_text = build_pending_knockout_chat_text(selected_knockout_stage, pending_knockout_summary)
             with st.expander("Prévia da mensagem"):
                 st.text(chat_text)
 
@@ -3158,8 +3090,7 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
                         max_fig_height=32,
                     )
                     send_google_chat_image(chat_text, image_path)
-                    st.success(
-                        "Pendências do mata-mata enviadas para o Google Chat.")
+                    st.success("Pendências do mata-mata enviadas para o Google Chat.")
                 except Exception as exc:
                     st.error(f"Erro ao enviar pendências do mata-mata: {exc}")
 
@@ -3170,28 +3101,22 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
             "O menu permite escolher qualquer jogo e reutilizar nas próximas fases. O admin é excluído da conta."
         )
 
-        selected_match_id, match_info = render_chat_match_selector(
-            matches, "chat_match_completion")
+        selected_match_id, match_info = render_chat_match_selector(matches, "chat_match_completion")
         if selected_match_id:
-            completion_view, completion_match, completion_summary = build_match_completion_status_table(
-                selected_match_id)
+            completion_view, completion_match, completion_summary = build_match_completion_status_table(selected_match_id)
 
             cm1, cm2, cm3 = st.columns(3)
             with cm1:
-                metric_box(
-                    "Completaram", f"{completion_summary.get('complete_users', 0)}/{completion_summary.get('participants', 0)}")
+                metric_box("Completaram", f"{completion_summary.get('complete_users', 0)}/{completion_summary.get('participants', 0)}")
             with cm2:
-                metric_box("Pendentes", str(
-                    completion_summary.get("pending_users", 0)))
+                metric_box("Pendentes", str(completion_summary.get("pending_users", 0)))
             with cm3:
                 metric_box("Jogo", str(selected_match_id))
 
             st.markdown("##### Prévia do status")
-            st.dataframe(completion_view, use_container_width=True,
-                         hide_index=True, height=420)
+            st.dataframe(completion_view, use_container_width=True, hide_index=True, height=420)
 
-            chat_text = build_match_completion_chat_text(
-                completion_match, completion_summary)
+            chat_text = build_match_completion_chat_text(completion_match, completion_summary)
             with st.expander("Prévia da mensagem"):
                 st.text(chat_text)
 
@@ -3224,11 +3149,9 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
         st.markdown("##### Prévia dos extras pendentes")
 
         if extras_pending_view.empty:
-            st.success(
-                "Todos os participantes já preencheram campeão e artilheiro.")
+            st.success("Todos os participantes já preencheram campeão e artilheiro.")
         else:
-            st.dataframe(extras_pending_view,
-                         use_container_width=True, hide_index=True, height=420)
+            st.dataframe(extras_pending_view, use_container_width=True, hide_index=True, height=420)
 
         chat_text = build_pending_extras_chat_text()
         with st.expander("Prévia da mensagem"):
@@ -3245,8 +3168,7 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
                 send_google_chat_image(chat_text, image_path)
                 st.success("Pendências de extras enviadas para o Google Chat.")
             except Exception as exc:
-                st.error(
-                    f"Erro ao enviar pendências de extras para Google Chat: {exc}")
+                st.error(f"Erro ao enviar pendências de extras para Google Chat: {exc}")
 
 # ============================================================
 # RANKING E DETALHE DE PONTOS
@@ -3398,8 +3320,7 @@ def build_score_breakdown_for_user(
     return df.sort_values(["Categoria", "Fase", "Item"]).reset_index(drop=True)
 
 
-@st.cache_data(ttl=300, show_spinner=False)
-def calculate_ranking_cached(
+def build_ranking_table(
     profiles: pd.DataFrame,
     matches: pd.DataFrame,
     predictions: pd.DataFrame,
@@ -3409,8 +3330,22 @@ def calculate_ranking_cached(
     bonus_predictions: pd.DataFrame,
     bonus_actuals: pd.DataFrame,
 ) -> pd.DataFrame:
+    """Monta a tabela de ranking com posição empatada e métricas de acerto.
+
+    Posição usa ranking competitivo: se duas pessoas empatam em 2º, ambas ficam
+    em 2º e a próxima posição vira 4º.
+    """
+    columns = [
+        "Posição",
+        "Usuário",
+        "user_id",
+        "Pontuação",
+        "Placares cravados",
+        "Resultados acertados",
+    ]
+
     if profiles.empty:
-        return pd.DataFrame(columns=["Posição", "Usuário", "Pontuação"])
+        return pd.DataFrame(columns=columns)
 
     ranking_rows = []
 
@@ -3431,23 +3366,201 @@ def calculate_ranking_cached(
 
         score = int(breakdown["Pontos"].sum()) if not breakdown.empty else 0
 
+        if breakdown.empty:
+            exact_scores = 0
+            correct_results = 0
+        else:
+            categories = breakdown.get("Categoria", pd.Series(dtype=str)).fillna("").astype(str).str.lower()
+            details = breakdown.get("Detalhe", pd.Series(dtype=str)).fillna("").astype(str).str.lower()
+            exact_scores = int(((categories == "jogo") & details.str.contains("placar exato", na=False)).sum())
+            correct_results = int(((categories == "jogo") & details.str.contains("resultado correto", na=False)).sum())
+
         ranking_rows.append(
             {
                 "Usuário": username,
                 "user_id": user_id,
                 "Pontuação": score,
+                "Placares cravados": exact_scores,
+                "Resultados acertados": correct_results,
             }
         )
 
     ranking = pd.DataFrame(ranking_rows)
     if ranking.empty:
-        return pd.DataFrame(columns=["Posição", "Usuário", "Pontuação"])
+        return pd.DataFrame(columns=columns)
+
+    ranking["Posição"] = ranking["Pontuação"].rank(
+        method="min",
+        ascending=False,
+    ).astype(int)
 
     ranking = ranking.sort_values(
-        "Pontuação", ascending=False).reset_index(drop=True)
-    ranking.insert(0, "Posição", ranking.index + 1)
+        ["Posição", "Usuário"],
+        ascending=[True, True],
+        kind="mergesort",
+    ).reset_index(drop=True)
 
-    return ranking
+    return ranking[columns]
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def calculate_ranking_cached(
+    profiles: pd.DataFrame,
+    matches: pd.DataFrame,
+    predictions: pd.DataFrame,
+    actual_results: pd.DataFrame,
+    phase_predictions: pd.DataFrame,
+    phase_actuals: pd.DataFrame,
+    bonus_predictions: pd.DataFrame,
+    bonus_actuals: pd.DataFrame,
+) -> pd.DataFrame:
+    return build_ranking_table(
+        profiles=profiles,
+        matches=matches,
+        predictions=predictions,
+        actual_results=actual_results,
+        phase_predictions=phase_predictions,
+        phase_actuals=phase_actuals,
+        bonus_predictions=bonus_predictions,
+        bonus_actuals=bonus_actuals,
+    )
+
+
+def get_latest_actual_match_id_for_ranking_movement(matches: pd.DataFrame, actual_results: pd.DataFrame) -> str | None:
+    """Encontra o último resultado oficial usado para calcular variação de posição.
+
+    Quando actual_results tiver updated_at/created_at, usa isso. Caso contrário,
+    usa o horário do jogo e match_no como proxy. A seta do ranking compara o
+    ranking atual contra o ranking antes desse último resultado.
+    """
+    if actual_results is None or actual_results.empty or "match_id" not in actual_results.columns:
+        return None
+
+    actual = actual_results.copy()
+    actual = actual[actual["match_id"].notna()].copy()
+    if actual["match_id"].astype(str).nunique() < 2:
+        return None
+
+    actual["match_id"] = actual["match_id"].astype(str)
+
+    if matches is not None and not matches.empty and "match_id" in matches.columns:
+        match_cols = [
+            col for col in ["match_id", "kickoff_at", "match_no"] if col in matches.columns
+        ]
+        sort_df = actual.merge(
+            matches[match_cols].assign(match_id=matches["match_id"].astype(str)),
+            on="match_id",
+            how="left",
+        )
+    else:
+        sort_df = actual.copy()
+
+    sort_candidates: list[str] = []
+
+    for date_col in ["updated_at", "created_at"]:
+        if date_col in sort_df.columns:
+            sort_key = f"_{date_col}_sort"
+            sort_df[sort_key] = pd.to_datetime(sort_df[date_col], errors="coerce")
+            if sort_df[sort_key].notna().any():
+                sort_candidates.append(sort_key)
+                break
+
+    if "kickoff_at" in sort_df.columns:
+        sort_df["_kickoff_sort"] = pd.to_datetime(sort_df["kickoff_at"], errors="coerce")
+        sort_candidates.append("_kickoff_sort")
+
+    if "match_no" in sort_df.columns:
+        sort_df["_match_no_sort"] = pd.to_numeric(sort_df["match_no"], errors="coerce")
+        sort_candidates.append("_match_no_sort")
+
+    sort_df["_match_id_sort"] = sort_df["match_id"].astype(str)
+    sort_candidates.append("_match_id_sort")
+
+    sort_df = sort_df.sort_values(sort_candidates, ascending=[True] * len(sort_candidates), na_position="last")
+    return str(sort_df.iloc[-1]["match_id"])
+
+
+def ranking_movement_label(current_position, previous_position) -> str:
+    """Formata a variação de ranking com seta."""
+    if previous_position is None or pd.isna(previous_position):
+        return "novo"
+
+    try:
+        current = int(current_position)
+        previous = int(previous_position)
+    except Exception:
+        return "→"
+
+    delta = previous - current
+    if delta > 0:
+        return f"↑ {delta}"
+    if delta < 0:
+        return f"↓ {abs(delta)}"
+    return "→"
+
+
+def build_ranking_chat_view(ranking: pd.DataFrame, data: dict) -> pd.DataFrame:
+    """Tabela de ranking otimizada para envio ao Google Chat.
+
+    Inclui setas ao lado do usuário comparando contra o ranking anterior ao
+    último resultado oficial cadastrado.
+    """
+    if ranking is None or ranking.empty:
+        return pd.DataFrame(
+            columns=["Posição", "Usuário", "Pontuação", "Placares cravados", "Resultados acertados"]
+        )
+
+    latest_match_id = get_latest_actual_match_id_for_ranking_movement(
+        data.get("matches", pd.DataFrame()),
+        data.get("actual_results", pd.DataFrame()),
+    )
+
+    previous_position_by_user: dict[str, int] = {}
+    if latest_match_id:
+        actual_results = data.get("actual_results", pd.DataFrame()).copy()
+        if not actual_results.empty and "match_id" in actual_results.columns:
+            previous_actuals = actual_results[
+                actual_results["match_id"].astype(str) != str(latest_match_id)
+            ].copy()
+
+            previous_ranking = build_ranking_table(
+                profiles=data.get("profiles", pd.DataFrame()),
+                matches=data.get("matches", pd.DataFrame()),
+                predictions=data.get("predictions", pd.DataFrame()),
+                actual_results=previous_actuals,
+                phase_predictions=data.get("phase_predictions", pd.DataFrame()),
+                phase_actuals=data.get("phase_actuals", pd.DataFrame()),
+                bonus_predictions=data.get("bonus_predictions", pd.DataFrame()),
+                bonus_actuals=data.get("bonus_actuals", pd.DataFrame()),
+            )
+
+            if not previous_ranking.empty and {"user_id", "Posição"}.issubset(previous_ranking.columns):
+                previous_position_by_user = {
+                    str(row.get("user_id")): int(row.get("Posição"))
+                    for _, row in previous_ranking.iterrows()
+                }
+
+    view_rows = []
+    for _, row in ranking.iterrows():
+        user_id = str(row.get("user_id", ""))
+        movement = ranking_movement_label(
+            row.get("Posição"),
+            previous_position_by_user.get(user_id),
+        )
+        username = str(row.get("Usuário", ""))
+        username_with_movement = f"{username} {movement}" if movement else username
+
+        view_rows.append(
+            {
+                "Posição": int(row.get("Posição", 0)),
+                "Usuário": username_with_movement,
+                "Pontuação": int(row.get("Pontuação", 0)),
+                "Placares cravados": int(row.get("Placares cravados", 0)),
+                "Resultados acertados": int(row.get("Resultados acertados", 0)),
+            }
+        )
+
+    return pd.DataFrame(view_rows)
 
 
 def load_ranking_inputs():
@@ -4048,13 +4161,11 @@ def build_user_template_excel(user_id: str, selected_stage: str | None = None) -
         return create_excel_bytes({"Palpites": pd.DataFrame()})
 
     if selected_stage and "stage" in matches.columns:
-        matches = matches[matches["stage"].astype(
-            str) == str(selected_stage)].copy()
+        matches = matches[matches["stage"].astype(str) == str(selected_stage)].copy()
         matches = sort_matches_for_display(matches)
 
     if not matches.empty:
-        matches = matches[[not is_match_locked(
-            row) for _, row in matches.iterrows()]].copy()
+        matches = matches[[not is_match_locked(row) for _, row in matches.iterrows()]].copy()
         matches = sort_matches_for_display(matches)
 
     if matches.empty:
@@ -4130,7 +4241,6 @@ def build_user_template_excel(user_id: str, selected_stage: str | None = None) -
     )
 
     return create_excel_bytes({"Palpites": out, "Extras": extras, "Instruções": instrucoes})
-
 
 def predictions_excel_to_payloads(uploaded_file, user_id: str, matches: pd.DataFrame, selected_stage: str | None = None) -> tuple[pd.DataFrame, list[dict], dict, list[str]]:
     """Lê o template importado e transforma em payloads para Supabase.
@@ -4338,7 +4448,6 @@ def predictions_excel_to_payloads(uploaded_file, user_id: str, matches: pd.DataF
     preview = pd.DataFrame(preview_rows)
     return preview, payloads, bonus_payload, errors
 
-
 def render_excel_template_import_page(user_id: str, username: str, supabase, matches: pd.DataFrame):
     st.markdown("### Template em Excel")
     st.caption(
@@ -4408,15 +4517,13 @@ def render_excel_template_import_page(user_id: str, username: str, supabase, mat
 
     ignored_count = 0
     if not preview.empty and "Status" in preview.columns:
-        ignored_count = int(preview["Status"].astype(
-            str).str.contains("Ignorado", case=False, na=False).sum())
+        ignored_count = int(preview["Status"].astype(str).str.contains("Ignorado", case=False, na=False).sum())
 
     if payloads:
         st.success(
             f"Arquivo validado: {len(payloads)} palpites abertos prontos para salvar.")
     elif ignored_count:
-        st.warning(
-            "Todos os jogos do arquivo já estavam com prazo encerrado. Nada de jogos será salvo.")
+        st.warning("Todos os jogos do arquivo já estavam com prazo encerrado. Nada de jogos será salvo.")
     else:
         st.info("Não há palpites de jogos para salvar.")
 
@@ -4430,8 +4537,7 @@ def render_excel_template_import_page(user_id: str, username: str, supabase, mat
                 payload_match_ids = {str(item.get("match_id"))
                                      for item in payloads}
                 for item in payloads:
-                    match_rows = matches[matches["match_id"].astype(
-                        str) == str(item.get("match_id"))]
+                    match_rows = matches[matches["match_id"].astype(str) == str(item.get("match_id"))]
                     if match_rows.empty:
                         continue
                     if is_match_locked(match_rows.iloc[0]):
@@ -4444,15 +4550,13 @@ def render_excel_template_import_page(user_id: str, username: str, supabase, mat
 
             if bonus_payload:
                 if is_stage_locked("extras"):
-                    st.warning(
-                        "Extras no Excel foram ignorados porque o prazo de extras já encerrou.")
+                    st.warning("Extras no Excel foram ignorados porque o prazo de extras já encerrou.")
                 else:
                     supabase.table("bonus_predictions").upsert(
                         bonus_payload, on_conflict="user_id").execute()
 
             if not safe_payloads and not bonus_payload:
-                st.warning(
-                    "Nada foi salvo: não havia palpites abertos no arquivo.")
+                st.warning("Nada foi salvo: não havia palpites abertos no arquivo.")
                 return
 
             clear_data_cache()
@@ -4460,7 +4564,6 @@ def render_excel_template_import_page(user_id: str, username: str, supabase, mat
             st.rerun()
         except Exception as exc:
             st.error(f"Erro ao salvar importação: {exc}")
-
 
 def build_user_predictions_overview(user_id: str, matches: pd.DataFrame) -> pd.DataFrame:
     predictions = load_table("predictions")
@@ -4564,8 +4667,7 @@ def render_knockout_predictions_fast(
         return
 
     total_count = len(stage_matches)
-    open_count = int(sum(not is_match_locked(row)
-                     for _, row in stage_matches.iterrows()))
+    open_count = int(sum(not is_match_locked(row) for _, row in stage_matches.iterrows()))
     locked_count = total_count - open_count
 
     st.markdown(
@@ -4603,8 +4705,7 @@ def render_knockout_predictions_fast(
         saved_ids = set(user_predictions["match_id"].astype(str).tolist())
 
     matches_per_page = 16
-    total_pages = max(
-        1, (len(stage_matches) + matches_per_page - 1) // matches_per_page)
+    total_pages = max(1, (len(stage_matches) + matches_per_page - 1) // matches_per_page)
 
     if total_pages > 1:
         page_number = st.selectbox(
@@ -4617,13 +4718,11 @@ def render_knockout_predictions_fast(
         page_number = 1
 
     start_idx = (page_number - 1) * matches_per_page
-    visible_matches = stage_matches.iloc[start_idx:start_idx +
-                                         matches_per_page].copy()
+    visible_matches = stage_matches.iloc[start_idx:start_idx + matches_per_page].copy()
 
     invalid_rows: list[str] = []
     payload_rows: list[dict] = []
-    visible_open_count = int(sum(not is_match_locked(row)
-                             for _, row in visible_matches.iterrows()))
+    visible_open_count = int(sum(not is_match_locked(row) for _, row in visible_matches.iterrows()))
 
     st.caption(
         "A coluna 'Classificado se empate' só é usada quando o placar digitado for empate. "
@@ -4644,18 +4743,15 @@ def render_knockout_predictions_fast(
 
             existing = pd.DataFrame()
             if not user_predictions.empty and "match_id" in user_predictions.columns:
-                existing = user_predictions[user_predictions["match_id"].astype(
-                    str) == match_id]
+                existing = user_predictions[user_predictions["match_id"].astype(str) == match_id]
 
             default_home = ""
             default_away = ""
             default_adv = ""
 
             if not existing.empty:
-                default_home = str(
-                    safe_int(existing.iloc[0].get("home_goals")))
-                default_away = str(
-                    safe_int(existing.iloc[0].get("away_goals")))
+                default_home = str(safe_int(existing.iloc[0].get("home_goals")))
+                default_away = str(safe_int(existing.iloc[0].get("away_goals")))
                 default_adv = existing.iloc[0].get("advancing_team") or ""
 
             st.markdown(
@@ -4663,8 +4759,7 @@ def render_knockout_predictions_fast(
                 f"  \n{kickoff_text} • Jogo {match_no} • {lock_badge} até {lock_text}"
             )
 
-            c_home, c_hg, c_x, c_ag, c_away, c_adv = st.columns(
-                [2.4, 0.8, 0.18, 0.8, 2.4, 2.2])
+            c_home, c_hg, c_x, c_ag, c_away, c_adv = st.columns([2.4, 0.8, 0.18, 0.8, 2.4, 2.2])
 
             with c_home:
                 st.markdown(
@@ -4709,8 +4804,7 @@ def render_knockout_predictions_fast(
 
             with c_adv:
                 adv_options = ["", home_team, away_team]
-                adv_index = adv_options.index(
-                    default_adv) if default_adv in adv_options else 0
+                adv_index = adv_options.index(default_adv) if default_adv in adv_options else 0
                 selected_adv = st.selectbox(
                     "Classificado se empate",
                     adv_options,
@@ -4755,8 +4849,7 @@ def render_knockout_predictions_fast(
             )
 
             if not final_advancing:
-                invalid_rows.append(
-                    label + " — escolha classificado no empate")
+                invalid_rows.append(label + " — escolha classificado no empate")
                 st.divider()
                 continue
 
@@ -4793,8 +4886,7 @@ def render_knockout_predictions_fast(
         match_id = str(match.get("match_id", ""))
         existing = pd.DataFrame()
         if not user_predictions.empty and "match_id" in user_predictions.columns:
-            existing = user_predictions[user_predictions["match_id"].astype(
-                str) == match_id]
+            existing = user_predictions[user_predictions["match_id"].astype(str) == match_id]
 
         if existing.empty:
             status = "Pendente"
@@ -4819,9 +4911,7 @@ def render_knockout_predictions_fast(
         )
 
     preview_df = pd.DataFrame(preview_rows)
-    st.dataframe(preview_df, use_container_width=True,
-                 hide_index=True, height=360)
-
+    st.dataframe(preview_df, use_container_width=True, hide_index=True, height=360)
 
 def render_grouped_group_predictions(
     user_id: str,
@@ -4845,8 +4935,7 @@ def render_grouped_group_predictions(
         return
 
     is_groups = is_group_stage(selected_stage)
-    open_stage_matches = stage_matches[[not is_match_locked(
-        row) for _, row in stage_matches.iterrows()]].copy()
+    open_stage_matches = stage_matches[[not is_match_locked(row) for _, row in stage_matches.iterrows()]].copy()
     open_count = len(open_stage_matches)
     locked_count = len(stage_matches) - open_count
 
@@ -4863,8 +4952,7 @@ def render_grouped_group_predictions(
     )
 
     if locked_count:
-        st.info(
-            f"{locked_count} jogo(s) desta fase já estão travados e serão ignorados ao salvar em lote.")
+        st.info(f"{locked_count} jogo(s) desta fase já estão travados e serão ignorados ao salvar em lote.")
     if open_count == 0:
         st.warning("Todos os jogos desta fase já estão travados.")
         return
@@ -4951,8 +5039,7 @@ def render_grouped_group_predictions(
                         default_adv = existing.iloc[0].get(
                             "advancing_team") or ""
 
-                    st.caption(
-                        f"{kickoff_text} • {lock_badge} até {lock_text}")
+                    st.caption(f"{kickoff_text} • {lock_badge} até {lock_text}")
                     c_home, c_hg, c_x, c_ag, c_away = st.columns(
                         [2.6, 0.75, 0.15, 0.75, 2.6])
                     with c_home:
@@ -5088,7 +5175,6 @@ def render_grouped_group_predictions(
                 st.dataframe(preview_table, use_container_width=True,
                              hide_index=True, height=180)
 
-
 def render_card_group_predictions(
     user_id: str,
     username: str,
@@ -5148,8 +5234,7 @@ def render_card_group_predictions(
         str).tolist()) if "match_id" in filtered.columns else set()
     saved_in_screen = len(saved_ids.intersection(filtered_ids))
     total_in_screen = len(filtered)
-    open_in_screen = int(sum(not is_match_locked(row)
-                         for _, row in filtered.iterrows())) if not filtered.empty else 0
+    open_in_screen = int(sum(not is_match_locked(row) for _, row in filtered.iterrows())) if not filtered.empty else 0
 
     with top_col3:
         st.markdown("<br>", unsafe_allow_html=True)
@@ -5442,14 +5527,11 @@ def render_match_predictions_page():
         render_stage_lock_message(
             selected_stage, label=f"Fase selecionada — {selected_stage}")
 
-        stage_matches = matches[matches["stage"].astype(
-            str) == str(selected_stage)].copy()
+        stage_matches = matches[matches["stage"].astype(str) == str(selected_stage)].copy()
         if not stage_matches.empty:
-            open_count = int(sum(not is_match_locked(row)
-                             for _, row in stage_matches.iterrows()))
+            open_count = int(sum(not is_match_locked(row) for _, row in stage_matches.iterrows()))
             locked_count = len(stage_matches) - open_count
-            st.caption(
-                f"Jogos da fase: {len(stage_matches)} | Abertos: {open_count} | Travados: {locked_count}")
+            st.caption(f"Jogos da fase: {len(stage_matches)} | Abertos: {open_count} | Travados: {locked_count}")
 
         if is_knockout_stage(selected_stage):
             st.info(
@@ -5480,7 +5562,6 @@ def render_match_predictions_page():
 
     # Botão final de "Salvar todos" removido/comentado a pedido.
     # Mantemos os botões de salvar dentro da tela ativa.
-
 
 def render_predictions_page():
     """Página única de palpites.
