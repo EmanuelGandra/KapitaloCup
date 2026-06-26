@@ -4083,6 +4083,278 @@ def render_predictions_overview_page(user_id: str, matches: pd.DataFrame):
     st.dataframe(view, use_container_width=True, hide_index=True, height=520)
 
 
+def render_knockout_predictions_fast(
+    user_id: str,
+    supabase,
+    matches: pd.DataFrame,
+    user_predictions: pd.DataFrame,
+    selected_stage: str,
+):
+    """Tela específica para mata-mata.
+
+    Diferente da fase de grupos, não existe divisão por grupo nem tabela simulada.
+    A tela mostra todos os confrontos da fase em ordem cronológica e salva
+    explicitamente o classificado em predictions.advancing_team.
+
+    Regra de classificado:
+    - Se houver vencedor no placar, o classificado é salvo automaticamente.
+    - Se o placar estiver empatado, o usuário precisa escolher quem passa.
+    """
+    stage_matches = sort_matches_for_display(
+        matches[matches["stage"].astype(str) == str(selected_stage)].copy()
+    )
+
+    if stage_matches.empty:
+        st.info("Não há jogos nesta fase.")
+        return
+
+    total_count = len(stage_matches)
+    open_count = int(sum(not is_match_locked(row) for _, row in stage_matches.iterrows()))
+    locked_count = total_count - open_count
+
+    st.markdown(
+        """
+        <div class="section-card">
+            <h3 style="margin-bottom:0.25rem;">Preenchimento do mata-mata</h3>
+            <p style="color:#6b7280;margin-bottom:0;">
+                Preencha os placares dos confrontos. O classificado é salvo junto com cada palpite.
+                Se houver vencedor no placar, o classificado é automático; se empatar, escolha quem passa.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        metric_box("Jogos da fase", str(total_count))
+    with c2:
+        metric_box("Jogos abertos", str(open_count))
+    with c3:
+        metric_box("Jogos travados", str(locked_count))
+
+    if locked_count:
+        st.info(
+            "Jogos já travados aparecem apenas para conferência e são ignorados ao salvar em lote."
+        )
+
+    if open_count == 0:
+        st.warning("Todos os jogos desta fase já estão travados.")
+        return
+
+    saved_ids = set()
+    if not user_predictions.empty and "match_id" in user_predictions.columns:
+        saved_ids = set(user_predictions["match_id"].astype(str).tolist())
+
+    matches_per_page = 16
+    total_pages = max(1, (len(stage_matches) + matches_per_page - 1) // matches_per_page)
+
+    if total_pages > 1:
+        page_number = st.selectbox(
+            "Página",
+            list(range(1, total_pages + 1)),
+            format_func=lambda x: f"Página {x} de {total_pages}",
+            key=f"knockout_page_number_{selected_stage}",
+        )
+    else:
+        page_number = 1
+
+    start_idx = (page_number - 1) * matches_per_page
+    visible_matches = stage_matches.iloc[start_idx:start_idx + matches_per_page].copy()
+
+    invalid_rows: list[str] = []
+    payload_rows: list[dict] = []
+    visible_open_count = int(sum(not is_match_locked(row) for _, row in visible_matches.iterrows()))
+
+    st.caption(
+        "A coluna 'Classificado se empate' só é usada quando o placar digitado for empate. "
+        "Em vitórias, o app salva automaticamente o vencedor como classificado."
+    )
+
+    with st.form(key=f"knockout_predictions_form_{selected_stage}_{page_number}"):
+        for _, match in visible_matches.iterrows():
+            match_id = str(match.get("match_id", ""))
+            match_locked = is_match_locked(match)
+            stage = match.get("stage", selected_stage)
+            home_team = match.get("home_team", "")
+            away_team = match.get("away_team", "")
+            kickoff_text = format_kickoff(match.get("kickoff_at"))
+            lock_text = match_lock_text(match)
+            match_no = match.get("match_no", "")
+            lock_badge = "🔒 Travado" if match_locked else "✅ Aberto"
+
+            existing = pd.DataFrame()
+            if not user_predictions.empty and "match_id" in user_predictions.columns:
+                existing = user_predictions[user_predictions["match_id"].astype(str) == match_id]
+
+            default_home = ""
+            default_away = ""
+            default_adv = ""
+
+            if not existing.empty:
+                default_home = str(safe_int(existing.iloc[0].get("home_goals")))
+                default_away = str(safe_int(existing.iloc[0].get("away_goals")))
+                default_adv = existing.iloc[0].get("advancing_team") or ""
+
+            st.markdown(
+                f"**{home_team} x {away_team}**"
+                f"  \n{kickoff_text} • Jogo {match_no} • {lock_badge} até {lock_text}"
+            )
+
+            c_home, c_hg, c_x, c_ag, c_away, c_adv = st.columns([2.4, 0.8, 0.18, 0.8, 2.4, 2.2])
+
+            with c_home:
+                st.markdown(
+                    f"<div style='font-weight:700;font-size:0.90rem;padding-top:0.45rem;'>{home_team}</div>",
+                    unsafe_allow_html=True,
+                )
+
+            with c_hg:
+                home_value_raw = st.text_input(
+                    f"Gols mandante {match_id}",
+                    value=default_home,
+                    key=f"ko_home_{match_id}",
+                    label_visibility="collapsed",
+                    max_chars=2,
+                    disabled=match_locked,
+                )
+
+            with c_x:
+                st.markdown(
+                    "<div style='text-align:center;font-weight:900;padding-top:0.42rem;'>×</div>",
+                    unsafe_allow_html=True,
+                )
+
+            with c_ag:
+                away_value_raw = st.text_input(
+                    f"Gols visitante {match_id}",
+                    value=default_away,
+                    key=f"ko_away_{match_id}",
+                    label_visibility="collapsed",
+                    max_chars=2,
+                    disabled=match_locked,
+                )
+
+            with c_away:
+                st.markdown(
+                    f"<div style='font-weight:700;font-size:0.90rem;padding-top:0.45rem;'>{away_team}</div>",
+                    unsafe_allow_html=True,
+                )
+
+            home_value = parse_score_input(home_value_raw)
+            away_value = parse_score_input(away_value_raw)
+
+            with c_adv:
+                adv_options = ["", home_team, away_team]
+                adv_index = adv_options.index(default_adv) if default_adv in adv_options else 0
+                selected_adv = st.selectbox(
+                    "Classificado se empate",
+                    adv_options,
+                    index=adv_index,
+                    key=f"ko_adv_{match_id}",
+                    disabled=match_locked,
+                    help=(
+                        "Só será usado se o placar estiver empatado. "
+                        "Se houver vencedor no placar, o app salva o vencedor automaticamente."
+                    ),
+                )
+
+                if home_value is not None and away_value is not None:
+                    if home_value > away_value:
+                        preview_adv = home_team
+                    elif away_value > home_value:
+                        preview_adv = away_team
+                    else:
+                        preview_adv = selected_adv or "pendente"
+                else:
+                    preview_adv = default_adv or "pendente"
+
+                st.caption(f"Classificado a salvar: {preview_adv}")
+
+            if match_locked:
+                st.divider()
+                continue
+
+            label = f"{kickoff_text} — {home_team} x {away_team}"
+
+            if home_value is None or away_value is None:
+                invalid_rows.append(label)
+                st.divider()
+                continue
+
+            final_advancing = infer_advancing_team(
+                home_team,
+                away_team,
+                home_value,
+                away_value,
+                selected_adv,
+            )
+
+            if not final_advancing:
+                invalid_rows.append(label + " — escolha classificado no empate")
+                st.divider()
+                continue
+
+            payload_rows.append(
+                {
+                    "user_id": user_id,
+                    "match_id": match_id,
+                    "home_goals": int(home_value),
+                    "away_goals": int(away_value),
+                    "advancing_team": final_advancing,
+                }
+            )
+
+            st.divider()
+
+        submitted = st.form_submit_button(
+            f"Salvar jogos abertos desta página ({visible_open_count} jogos)",
+            use_container_width=True,
+            disabled=visible_open_count == 0,
+        )
+
+    if submitted:
+        save_prediction_payloads_or_show_errors(
+            supabase,
+            payload_rows,
+            invalid_rows,
+            "Palpites do mata-mata salvos com placar e classificado.",
+        )
+
+    st.markdown("### Conferência rápida dos jogos desta página")
+
+    preview_rows = []
+    for _, match in visible_matches.iterrows():
+        match_id = str(match.get("match_id", ""))
+        existing = pd.DataFrame()
+        if not user_predictions.empty and "match_id" in user_predictions.columns:
+            existing = user_predictions[user_predictions["match_id"].astype(str) == match_id]
+
+        if existing.empty:
+            status = "Pendente"
+            palpite = ""
+            classificado = ""
+        else:
+            row = existing.iloc[0]
+            status = "Salvo"
+            palpite = f"{safe_int(row.get('home_goals'))} x {safe_int(row.get('away_goals'))}"
+            classificado = row.get("advancing_team") or ""
+
+        preview_rows.append(
+            {
+                "Status": status,
+                "Jogo": f"{match.get('home_team', '')} x {match.get('away_team', '')}",
+                "Horário": format_kickoff(match.get("kickoff_at")),
+                "Prazo": match_lock_text(match),
+                "Palpite salvo": palpite,
+                "Classificado salvo": classificado,
+                "match_id": match_id,
+            }
+        )
+
+    preview_df = pd.DataFrame(preview_rows)
+    st.dataframe(preview_df, use_container_width=True, hide_index=True, height=360)
+
 def render_grouped_group_predictions(
     user_id: str,
     supabase,
@@ -4626,6 +4898,7 @@ def render_card_group_predictions(
         if match_id_str in saved_ids:
             status_pill("Salvo", "green")
 
+
 def render_match_predictions_page():
     if not st.session_state.get("is_logged_in", False):
         st.warning("Você precisa fazer login para registrar palpites.")
@@ -4656,7 +4929,8 @@ def render_match_predictions_page():
         <div class="section-card">
             <h3 style="margin-bottom:0.25rem;">Meus palpites</h3>
             <p style="color:#6b7280;margin-bottom:0;">
-                Preencha pelo app, use o modo agrupado rápido ou baixe/importe um template em Excel.
+                Preencha seus placares pelo app ou baixe/importe um template em Excel.
+                Em mata-mata, o classificado é salvo junto com cada confronto.
             </p>
         </div>
         """,
@@ -4686,13 +4960,6 @@ def render_match_predictions_page():
                 "A tabela de jogos não possui a coluna `stage` preenchida.")
             return
 
-        fill_mode = st.radio(
-            "Modo de preenchimento",
-            ["Preenchimento agrupado rápido", "Por grupo / jogo a jogo"],
-            horizontal=True,
-            key="prediction_fill_mode",
-        )
-
         selected_stage = st.selectbox(
             "Fase",
             stages,
@@ -4708,6 +4975,23 @@ def render_match_predictions_page():
             locked_count = len(stage_matches) - open_count
             st.caption(f"Jogos da fase: {len(stage_matches)} | Abertos: {open_count} | Travados: {locked_count}")
 
+        if is_knockout_stage(selected_stage):
+            st.info(
+                "Tela de mata-mata: sem divisão por grupo. "
+                "Preencha os confrontos em ordem; o app salva o classificado de cada jogo."
+            )
+            render_knockout_predictions_fast(
+                user_id, supabase, matches, user_predictions, selected_stage
+            )
+            return
+
+        fill_mode = st.radio(
+            "Modo de preenchimento",
+            ["Preenchimento agrupado rápido", "Por grupo / jogo a jogo"],
+            horizontal=True,
+            key="prediction_fill_mode",
+        )
+
         if fill_mode == "Preenchimento agrupado rápido":
             render_grouped_group_predictions(
                 user_id, supabase, matches, user_predictions, selected_stage)
@@ -4719,7 +5003,7 @@ def render_match_predictions_page():
                 user_id, username, supabase, matches, user_predictions, teams)
 
     # Botão final de "Salvar todos" removido/comentado a pedido.
-    # Mantemos apenas os botões no topo do modo por grupo e no fim do bloco agrupado.
+    # Mantemos os botões de salvar dentro da tela ativa.
 
 def render_predictions_page():
     """Página única de palpites.
@@ -5455,7 +5739,7 @@ def main():
     elif page == "Meus palpites":
         hero(
             "Meus palpites",
-            "Preencha seus placares por grupo. Classificado só aparece em jogos de mata-mata.",
+            "Preencha seus placares. Em mata-mata, o classificado é salvo junto com cada confronto.",
         )
         render_predictions_page()
 
