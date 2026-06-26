@@ -2268,17 +2268,20 @@ def build_pending_knockout_chat_text(selected_stage: str, summary: dict) -> str:
     return (
         "🏆 Kapitalo Cup\n\n"
         f"Pendências do mata-mata — {selected_stage}\n"
-        f"Escopo: {scope}.\n"
-        "Admin removido da conta.\n\n"
+        f"Escopo: {scope}.\n\n"
         f"Usuários com tudo completo: {summary.get('complete_users', 0)}\n"
         f"Usuários pendentes: {summary.get('pending_users', 0)}\n"
-        f"Jogos considerados: {summary.get('total_matches', 0)}\n\n"
-        "A tabela mostra somente quem ainda precisa completar placar e classificado."
+        f"Jogos considerados: {summary.get('total_matches', 0)}"
     )
 
 
-def build_match_completion_status_table(match_id: str) -> tuple[pd.DataFrame, dict, dict]:
-    """Status de preenchimento de um jogo específico, excluindo o admin."""
+def build_match_completion_status_table(match_id: str, status_filter: str = "all") -> tuple[pd.DataFrame, dict, dict]:
+    """Status de preenchimento de um jogo específico, excluindo o admin.
+
+    status_filter:
+    - "all": mostra todos os participantes.
+    - "pending": mostra somente participantes pendentes.
+    """
     profiles = get_non_admin_profiles()
     matches = sort_matches_for_display(load_table("matches", order_by="match_no"))
     predictions = load_table("predictions")
@@ -2338,6 +2341,13 @@ def build_match_completion_status_table(match_id: str) -> tuple[pd.DataFrame, di
     if out.empty:
         return out, match, summary
 
+    status_filter = str(status_filter or "all").strip().lower()
+    if status_filter in {"pending", "pendentes", "only_pending", "somente_pendentes"}:
+        out = out[out["Status"] == "Pendente"].copy()
+
+    if out.empty:
+        return out, match, summary
+
     out["_ordem"] = out["Status"].map({"Pendente": 0, "Completo": 1}).fillna(2)
     out = out.sort_values(["_ordem", "Usuário"], ascending=[True, True]).drop(columns=["_ordem"])
     return out.reset_index(drop=True), match, summary
@@ -2355,11 +2365,9 @@ def build_match_completion_chat_text(match: dict, summary: dict) -> str:
         f"Status de preenchimento — {home_team} x {away_team}\n"
         f"Fase: {stage}\n"
         f"Horário: {kickoff_text}\n"
-        f"Prazo: {lock_text}\n"
-        "Admin removido da conta.\n\n"
+        f"Prazo: {lock_text}\n\n"
         f"Completaram: {summary.get('complete_users', 0)} de {summary.get('participants', 0)}\n"
-        f"Pendentes: {summary.get('pending_users', 0)}\n\n"
-        "A tabela mostra quem já completou e quem ainda está pendente."
+        f"Pendentes: {summary.get('pending_users', 0)}"
     )
 
 
@@ -3027,8 +3035,7 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
     with tab_pending_knockout_chat:
         st.markdown("#### Enviar pendências do mata-mata")
         st.caption(
-            "Mostra somente participantes pendentes de completar placar e classificado em jogos do mata-mata. "
-            "O usuário admin é excluído da conta."
+            "Mostra somente participantes pendentes de completar placar e classificado em jogos do mata-mata."
         )
 
         schedule_matches = sort_matches_for_display(matches)
@@ -3085,7 +3092,7 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
                     image_path = dataframe_to_png(
                         pending_knockout_view,
                         title=f"Pendências do mata-mata — {selected_knockout_stage}",
-                        subtitle=f"Escopo: {scope} • Admin excluído",
+                        subtitle=f"Escopo: {scope}",
                         max_rows=None,
                         max_fig_height=32,
                     )
@@ -3098,12 +3105,24 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
         st.markdown("#### Enviar status de preenchimento de um jogo")
         st.caption(
             "Use esta aba para exceções de prazo, como R32-01. "
-            "O menu permite escolher qualquer jogo e reutilizar nas próximas fases. O admin é excluído da conta."
+            "O menu permite escolher qualquer jogo e reutilizar nas próximas fases."
         )
 
         selected_match_id, match_info = render_chat_match_selector(matches, "chat_match_completion")
         if selected_match_id:
-            completion_view, completion_match, completion_summary = build_match_completion_status_table(selected_match_id)
+            completion_filter_label = st.radio(
+                "Quem entra na tabela/imagem?",
+                ["Todos", "Somente pendentes"],
+                horizontal=True,
+                key="chat_match_completion_filter",
+                help="Use 'Somente pendentes' para enviar apenas quem ainda não completou esse jogo.",
+            )
+            completion_filter = "pending" if completion_filter_label == "Somente pendentes" else "all"
+
+            completion_view, completion_match, completion_summary = build_match_completion_status_table(
+                selected_match_id,
+                status_filter=completion_filter,
+            )
 
             cm1, cm2, cm3 = st.columns(3)
             with cm1:
@@ -3114,7 +3133,11 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
                 metric_box("Jogo", str(selected_match_id))
 
             st.markdown("##### Prévia do status")
-            st.dataframe(completion_view, use_container_width=True, hide_index=True, height=420)
+            st.caption(f"Filtro da imagem: {completion_filter_label}.")
+            if completion_view.empty:
+                st.info("Não há participantes nesse filtro.")
+            else:
+                st.dataframe(completion_view, use_container_width=True, hide_index=True, height=420)
 
             chat_text = build_match_completion_chat_text(completion_match, completion_summary)
             with st.expander("Prévia da mensagem"):
@@ -3132,7 +3155,8 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
                         title=f"Status — {completion_match.get('home_team', '')} x {completion_match.get('away_team', '')}",
                         subtitle=(
                             f"{completion_match.get('stage', '')} • "
-                            f"Completaram: {completion_summary.get('complete_users', 0)} de {completion_summary.get('participants', 0)} • Admin excluído"
+                            f"Completaram: {completion_summary.get('complete_users', 0)} de {completion_summary.get('participants', 0)} • "
+                            f"Filtro: {completion_filter_label}"
                         ),
                         max_rows=None,
                         max_fig_height=32,
