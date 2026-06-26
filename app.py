@@ -2286,7 +2286,7 @@ def build_pending_knockout_chat_text(selected_stage: str, summary: dict) -> str:
         f"Usuários com tudo completo: {summary.get('complete_users', 0)}\n"
         f"Usuários pendentes: {summary.get('pending_users', 0)}\n"
         f"Jogos considerados: {summary.get('total_matches', 0)}\n\n"
-        "A tabela mostra somente quem ainda precisa completar placar e classificado."
+        "A tabela mostra somente quem ainda precisa completar placar e classificado nesse jogo."
     )
 
 
