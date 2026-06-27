@@ -1814,6 +1814,19 @@ def dataframe_to_png(
 
         cell.set_facecolor(row_color)
 
+        if row > 0 and row - 1 < len(table_df):
+            col_label = str(table_df.columns[col]).strip().casefold() if col < len(table_df.columns) else ""
+            cell_text = str(table_df.iloc[row - 1, col]) if col < len(table_df.columns) else ""
+            if col_label in {"usuário", "usuario", "participante"}:
+                if "↑" in cell_text:
+                    cell.set_text_props(color="#047857", weight="bold")
+                elif "↓" in cell_text:
+                    cell.set_text_props(color="#be123c", weight="bold")
+                elif "→" in cell_text:
+                    cell.set_text_props(color="#6b7280", weight="bold")
+                elif "novo" in cell_text.casefold():
+                    cell.set_text_props(color="#1d4ed8", weight="bold")
+
     if has_footer:
         ax.text(
             0.0,
@@ -2016,10 +2029,12 @@ def build_match_chat_text(match: dict) -> str:
     )
 
 
-def build_ranking_chat_text() -> str:
+def build_ranking_chat_text(comparison_label: str = "") -> str:
+    comparison_line = f"\n{comparison_label}\n" if comparison_label else "\n"
     return (
         "🏆 Kapitalo Cup\n\n"
-        "Ranking atualizado.\n\n"
+        "Ranking atualizado.\n"
+        f"{comparison_line}"
         "Segue a classificação geral da Kapitalo Cup."
     )
 
@@ -2942,14 +2957,15 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
         )
 
         ranking_view = build_ranking_chat_view(ranking, data)
+        comparison_label = ranking_view.attrs.get("comparison_label", "")
         st.markdown("##### Prévia do ranking")
         st.caption(
             "Posições empatadas aparecem com o mesmo número. "
-            "As setas ao lado dos nomes comparam a posição atual com a posição antes do último resultado oficial cadastrado."
+            f"{comparison_label}"
         )
         st.dataframe(ranking_view, use_container_width=True, hide_index=True, height=420)
 
-        chat_text = build_ranking_chat_text()
+        chat_text = build_ranking_chat_text(comparison_label)
         with st.expander("Prévia da mensagem"):
             st.text(chat_text)
 
@@ -2963,7 +2979,7 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
                 image_path = dataframe_to_png(
                     ranking_view,
                     title="Ranking Kapitalo Cup",
-                    subtitle=now_app_tz().strftime("Atualizado em %d/%m/%Y %H:%M"),
+                    subtitle=(comparison_label or now_app_tz().strftime("Atualizado em %d/%m/%Y %H:%M")),
                     max_rows=None,
                     max_fig_height=36,
                 )
@@ -3450,58 +3466,146 @@ def calculate_ranking_cached(
     )
 
 
-def get_latest_actual_match_id_for_ranking_movement(matches: pd.DataFrame, actual_results: pd.DataFrame) -> str | None:
-    """Encontra o último resultado oficial usado para calcular variação de posição.
+def _ranking_game_day(value, cutoff_hour: int = 5) -> pd.Timestamp:
+    """Transforma um horário de jogo em dia de ranking.
 
-    Quando actual_results tiver updated_at/created_at, usa isso. Caso contrário,
-    usa o horário do jogo e match_no como proxy. A seta do ranking compara o
-    ranking atual contra o ranking antes desse último resultado.
+    A janela do ranking diário fecha de madrugada: jogos entre 00h e 04h59
+    contam para o dia anterior. Assim, a tabela enviada às 06h30 compara o
+    ranking depois do dia anterior contra o ranking depois de dois dias antes.
+    """
+    ts = pd.to_datetime(value, errors="coerce")
+    if pd.isna(ts):
+        return pd.NaT
+
+    ts = pd.Timestamp(ts)
+    try:
+        if ts.tzinfo is not None:
+            ts = ts.tz_convert(APP_TIMEZONE).tz_localize(None)
+    except Exception:
+        pass
+
+    if int(ts.hour) < int(cutoff_hour):
+        ts = ts - pd.Timedelta(days=1)
+
+    return pd.Timestamp(year=ts.year, month=ts.month, day=ts.day)
+
+
+def build_actual_results_with_ranking_day(
+    matches: pd.DataFrame,
+    actual_results: pd.DataFrame,
+    cutoff_hour: int = 5,
+) -> pd.DataFrame:
+    """Anexa a cada resultado oficial o dia de ranking do respectivo jogo.
+
+    Prioriza matches.kickoff_at, porque a comparação diária deve seguir o dia
+    do jogo, não o horário em que o admin cadastrou o resultado no Supabase.
+    Como fallback, usa updated_at/created_at quando existirem.
     """
     if actual_results is None or actual_results.empty or "match_id" not in actual_results.columns:
-        return None
+        return pd.DataFrame()
 
     actual = actual_results.copy()
-    actual = actual[actual["match_id"].notna()].copy()
-    if actual["match_id"].astype(str).nunique() < 2:
-        return None
-
     actual["match_id"] = actual["match_id"].astype(str)
 
     if matches is not None and not matches.empty and "match_id" in matches.columns:
         match_cols = [
-            col for col in ["match_id", "kickoff_at", "match_no"] if col in matches.columns
+            col for col in ["match_id", "kickoff_at", "match_no", "stage", "home_team", "away_team"]
+            if col in matches.columns
         ]
-        sort_df = actual.merge(
-            matches[match_cols].assign(match_id=matches["match_id"].astype(str)),
-            on="match_id",
-            how="left",
-        )
-    else:
-        sort_df = actual.copy()
+        match_info = matches[match_cols].copy()
+        match_info["match_id"] = match_info["match_id"].astype(str)
+        actual = actual.merge(match_info, on="match_id", how="left", suffixes=("", "_match"))
 
-    sort_candidates: list[str] = []
+    actual["_ranking_day"] = pd.NaT
 
-    for date_col in ["updated_at", "created_at"]:
-        if date_col in sort_df.columns:
-            sort_key = f"_{date_col}_sort"
-            sort_df[sort_key] = pd.to_datetime(sort_df[date_col], errors="coerce")
-            if sort_df[sort_key].notna().any():
-                sort_candidates.append(sort_key)
-                break
+    # Primeiro usa kickoff_at. Se algum jogo estiver sem horário, tenta datas de cadastro/edição.
+    for date_col in ["kickoff_at", "updated_at", "created_at"]:
+        if date_col not in actual.columns:
+            continue
+        candidate_days = actual[date_col].apply(lambda value: _ranking_game_day(value, cutoff_hour=cutoff_hour))
+        actual["_ranking_day"] = actual["_ranking_day"].fillna(candidate_days)
 
-    if "kickoff_at" in sort_df.columns:
-        sort_df["_kickoff_sort"] = pd.to_datetime(sort_df["kickoff_at"], errors="coerce")
-        sort_candidates.append("_kickoff_sort")
+    return actual
 
-    if "match_no" in sort_df.columns:
-        sort_df["_match_no_sort"] = pd.to_numeric(sort_df["match_no"], errors="coerce")
-        sort_candidates.append("_match_no_sort")
 
-    sort_df["_match_id_sort"] = sort_df["match_id"].astype(str)
-    sort_candidates.append("_match_id_sort")
+def get_ranking_daily_comparison_context(
+    matches: pd.DataFrame,
+    actual_results: pd.DataFrame,
+    cutoff_hour: int = 5,
+) -> dict:
+    """Define a comparação diária do ranking.
 
-    sort_df = sort_df.sort_values(sort_candidates, ascending=[True] * len(sort_candidates), na_position="last")
-    return str(sort_df.iloc[-1]["match_id"])
+    Exemplo: se o último resultado oficial pertence ao dia de ranking 26/06,
+    as setas comparam o ranking acumulado até 26/06 contra o ranking acumulado
+    até 25/06. A janela do dia é 05h00 -> 04h59 do dia seguinte.
+    """
+    actual_with_day = build_actual_results_with_ranking_day(
+        matches=matches,
+        actual_results=actual_results,
+        cutoff_hour=cutoff_hour,
+    )
+
+    if actual_with_day.empty or "_ranking_day" not in actual_with_day.columns:
+        return {}
+
+    known_days = actual_with_day["_ranking_day"].dropna()
+    if known_days.empty:
+        return {}
+
+    current_day = pd.Timestamp(known_days.max()).normalize()
+    previous_day = current_day - pd.Timedelta(days=1)
+
+    known_mask = actual_with_day["_ranking_day"].notna()
+    unknown_ids = set(actual_with_day.loc[~known_mask, "match_id"].astype(str).tolist())
+
+    current_ids = set(
+        actual_with_day.loc[
+            known_mask & (actual_with_day["_ranking_day"] <= current_day),
+            "match_id",
+        ].astype(str).tolist()
+    ) | unknown_ids
+
+    previous_ids = set(
+        actual_with_day.loc[
+            known_mask & (actual_with_day["_ranking_day"] <= previous_day),
+            "match_id",
+        ].astype(str).tolist()
+    ) | unknown_ids
+
+    actual_results_str = actual_results.copy()
+    actual_results_str["match_id"] = actual_results_str["match_id"].astype(str)
+
+    current_actuals = actual_results_str[actual_results_str["match_id"].isin(current_ids)].copy()
+    previous_actuals = actual_results_str[actual_results_str["match_id"].isin(previous_ids)].copy()
+
+    comparison_label = (
+        f"Setas: ranking após jogos de {current_day.strftime('%d/%m/%Y')} "
+        f"vs {previous_day.strftime('%d/%m/%Y')} "
+        f"(janela {int(cutoff_hour):02d}h-{int(cutoff_hour):02d}h)."
+    )
+
+    return {
+        "current_day": current_day,
+        "previous_day": previous_day,
+        "current_actuals": current_actuals,
+        "previous_actuals": previous_actuals,
+        "comparison_label": comparison_label,
+        "cutoff_hour": cutoff_hour,
+    }
+
+
+def get_latest_actual_match_id_for_ranking_movement(matches: pd.DataFrame, actual_results: pd.DataFrame) -> str | None:
+    """Compatibilidade com versões anteriores.
+
+    O ranking do Google Chat agora usa comparação diária, não mais a exclusão
+    do último jogo isolado. Esta função fica mantida para não quebrar chamadas
+    antigas, mas não é mais usada na tabela enviada ao Chat.
+    """
+    context = get_ranking_daily_comparison_context(matches, actual_results, cutoff_hour=5)
+    current_actuals = context.get("current_actuals") if context else None
+    if current_actuals is None or current_actuals.empty or "match_id" not in current_actuals.columns:
+        return None
+    return str(current_actuals.iloc[-1].get("match_id"))
 
 
 def ranking_movement_label(current_position, previous_position) -> str:
@@ -3526,46 +3630,59 @@ def ranking_movement_label(current_position, previous_position) -> str:
 def build_ranking_chat_view(ranking: pd.DataFrame, data: dict) -> pd.DataFrame:
     """Tabela de ranking otimizada para envio ao Google Chat.
 
-    Inclui setas ao lado do usuário comparando contra o ranking anterior ao
-    último resultado oficial cadastrado.
+    Inclui posições empatadas, métricas de acerto e setas comparando o ranking
+    acumulado do último dia de jogos contra o dia imediatamente anterior.
     """
+    empty_columns = ["Posição", "Usuário", "Pontuação", "Placares cravados", "Resultados acertados"]
     if ranking is None or ranking.empty:
-        return pd.DataFrame(
-            columns=["Posição", "Usuário", "Pontuação", "Placares cravados", "Resultados acertados"]
-        )
+        return pd.DataFrame(columns=empty_columns)
 
-    latest_match_id = get_latest_actual_match_id_for_ranking_movement(
+    context = get_ranking_daily_comparison_context(
         data.get("matches", pd.DataFrame()),
         data.get("actual_results", pd.DataFrame()),
+        cutoff_hour=5,
     )
 
+    ranking_for_view = ranking.copy()
     previous_position_by_user: dict[str, int] = {}
-    if latest_match_id:
-        actual_results = data.get("actual_results", pd.DataFrame()).copy()
-        if not actual_results.empty and "match_id" in actual_results.columns:
-            previous_actuals = actual_results[
-                actual_results["match_id"].astype(str) != str(latest_match_id)
-            ].copy()
+    comparison_label = "Setas: sem comparação diária disponível."
 
-            previous_ranking = build_ranking_table(
+    if context:
+        current_actuals = context.get("current_actuals", pd.DataFrame())
+        previous_actuals = context.get("previous_actuals", pd.DataFrame())
+        comparison_label = context.get("comparison_label", comparison_label)
+
+        if isinstance(current_actuals, pd.DataFrame) and not current_actuals.empty:
+            ranking_for_view = build_ranking_table(
                 profiles=data.get("profiles", pd.DataFrame()),
                 matches=data.get("matches", pd.DataFrame()),
                 predictions=data.get("predictions", pd.DataFrame()),
-                actual_results=previous_actuals,
+                actual_results=current_actuals,
                 phase_predictions=data.get("phase_predictions", pd.DataFrame()),
                 phase_actuals=data.get("phase_actuals", pd.DataFrame()),
                 bonus_predictions=data.get("bonus_predictions", pd.DataFrame()),
                 bonus_actuals=data.get("bonus_actuals", pd.DataFrame()),
             )
 
-            if not previous_ranking.empty and {"user_id", "Posição"}.issubset(previous_ranking.columns):
-                previous_position_by_user = {
-                    str(row.get("user_id")): int(row.get("Posição"))
-                    for _, row in previous_ranking.iterrows()
-                }
+        previous_ranking = build_ranking_table(
+            profiles=data.get("profiles", pd.DataFrame()),
+            matches=data.get("matches", pd.DataFrame()),
+            predictions=data.get("predictions", pd.DataFrame()),
+            actual_results=previous_actuals if isinstance(previous_actuals, pd.DataFrame) else pd.DataFrame(),
+            phase_predictions=data.get("phase_predictions", pd.DataFrame()),
+            phase_actuals=data.get("phase_actuals", pd.DataFrame()),
+            bonus_predictions=data.get("bonus_predictions", pd.DataFrame()),
+            bonus_actuals=data.get("bonus_actuals", pd.DataFrame()),
+        )
+
+        if not previous_ranking.empty and {"user_id", "Posição"}.issubset(previous_ranking.columns):
+            previous_position_by_user = {
+                str(row.get("user_id")): int(row.get("Posição"))
+                for _, row in previous_ranking.iterrows()
+            }
 
     view_rows = []
-    for _, row in ranking.iterrows():
+    for _, row in ranking_for_view.iterrows():
         user_id = str(row.get("user_id", ""))
         movement = ranking_movement_label(
             row.get("Posição"),
@@ -3584,8 +3701,9 @@ def build_ranking_chat_view(ranking: pd.DataFrame, data: dict) -> pd.DataFrame:
             }
         )
 
-    return pd.DataFrame(view_rows)
-
+    out = pd.DataFrame(view_rows, columns=empty_columns)
+    out.attrs["comparison_label"] = comparison_label
+    return out
 
 def load_ranking_inputs():
     profiles = load_table("profiles")
