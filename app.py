@@ -963,6 +963,7 @@ def next_open_lock_info() -> tuple[str, pd.Timestamp] | None:
     """Próximo prazo aberto.
 
     Considera prazos por fase e também overrides por jogo em public.matches.prediction_lock_at.
+    O retorno já vem com um nome amigável para aparecer direto na interface.
     """
     now = now_app_tz()
     future_rows = []
@@ -970,17 +971,28 @@ def next_open_lock_info() -> tuple[str, pd.Timestamp] | None:
     for lock_key in DEFAULT_STAGE_LOCKS:
         lock_at = get_stage_lock_at(lock_key)
         if lock_at > now:
-            future_rows.append((lock_key, lock_at))
+            future_rows.append((get_lock_label_from_key(lock_key), lock_at))
 
     try:
         matches = load_table("matches", order_by="match_no")
         if not matches.empty:
             for _, row in matches.iterrows():
                 lock_at = get_match_lock_at(row)
-                if lock_at > now:
-                    match_id = str(row.get("match_id", ""))
-                    label = match_id or get_lock_label_from_key(get_stage_lock_key(row.get("stage", "")))
-                    future_rows.append((label, lock_at))
+                if lock_at <= now:
+                    continue
+
+                stage_label = get_lock_label_from_key(
+                    get_stage_lock_key(row.get("stage", ""))
+                )
+                home_team = str(row.get("home_team", "") or "").strip()
+                away_team = str(row.get("away_team", "") or "").strip()
+
+                if home_team and away_team:
+                    label = f"{stage_label}: {home_team} x {away_team}"
+                else:
+                    label = stage_label
+
+                future_rows.append((label, lock_at))
     except Exception:
         pass
 
@@ -3580,8 +3592,7 @@ def get_ranking_daily_comparison_context(
 
     comparison_label = (
         f"Setas: ranking após jogos de {current_day.strftime('%d/%m/%Y')} "
-        f"vs {previous_day.strftime('%d/%m/%Y')} "
-        f"(janela {int(cutoff_hour):02d}h-{int(cutoff_hour):02d}h)."
+        f"vs {previous_day.strftime('%d/%m/%Y')}."
     )
 
     return {
@@ -3806,7 +3817,7 @@ def render_logged_sidebar():
         else:
             next_key, next_at = next_lock
             st.info(
-                f"Próximo prazo: {get_lock_label_from_key(next_key)} até {next_at.strftime('%d/%m/%Y %H:%M')}.")
+                f"Próximo prazo: {next_key} até {next_at.strftime('%d/%m/%Y %H:%M')}.")
 
         if st.button("Sair", key="btn_logout", use_container_width=True):
             logout()
@@ -3887,7 +3898,7 @@ def render_home_page():
             metric_box("Próximo prazo", "Todos travados")
         else:
             next_key, next_at = next_lock
-            metric_box("Próximo prazo", get_lock_label_from_key(next_key))
+            metric_box("Próximo prazo", next_key)
 
     if next_lock is None:
         st.warning(
@@ -3895,7 +3906,7 @@ def render_home_page():
     else:
         next_key, next_at = next_lock
         st.success(
-            f"Próximo fechamento: {get_lock_label_from_key(next_key)} em {next_at.strftime('%d/%m/%Y %H:%M')}."
+            f"Próximo fechamento: {next_key} em {next_at.strftime('%d/%m/%Y %H:%M')}."
         )
 
     with st.expander("Ver prazos por fase", expanded=True):
