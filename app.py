@@ -2495,7 +2495,7 @@ def render_chat_match_selector(matches: pd.DataFrame, key_prefix: str) -> tuple[
 
     with col_stage:
         selected_stage = st.selectbox("Fase", stages, index=get_default_stage_index(
-            stages, preferred_key="r32"), key=f"{key_prefix}_stage")
+            stages, preferred_key="r16"), key=f"{key_prefix}_stage")
 
     filtered = schedule_matches[schedule_matches["stage"]
                                 == selected_stage].copy()
@@ -3146,7 +3146,7 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
                 "Fase do mata-mata",
                 knockout_stages,
                 index=get_default_stage_index(
-                    knockout_stages, preferred_key="r32"),
+                    knockout_stages, preferred_key="r16"),
                 key="chat_pending_knockout_stage",
             )
             only_open_matches = st.checkbox(
@@ -4728,7 +4728,7 @@ def render_excel_template_import_page(user_id: str, username: str, supabase, mat
     selected_template_stage = st.selectbox(
         "Template para qual fase aberta?",
         stage_options,
-        index=get_default_stage_index(stage_options, preferred_key="r32"),
+        index=get_default_stage_index(stage_options, preferred_key="r16"),
         key="template_stage_selector",
     )
 
@@ -5518,7 +5518,7 @@ def render_card_group_predictions(
         selected_stage = st.selectbox(
             "Fase",
             stages,
-            index=get_default_stage_index(stages, preferred_key="r32"),
+            index=get_default_stage_index(stages, preferred_key="r16"),
             key="pred_stage",
         )
 
@@ -5834,7 +5834,7 @@ def render_match_predictions_page():
         selected_stage = st.selectbox(
             "Fase",
             stages,
-            index=get_default_stage_index(stages, preferred_key="r32"),
+            index=get_default_stage_index(stages, preferred_key="r16"),
             key="prediction_stage_main",
         )
         render_stage_lock_message(
