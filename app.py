@@ -904,10 +904,10 @@ def match_lock_source_text(match_or_row) -> str:
     return "Prazo específico do jogo" if has_match_lock_override(match_or_row) else "Prazo padrão da fase"
 
 
-def get_default_stage_index(stages: list[str], preferred_key: str = "r16") -> int:
+def get_default_stage_index(stages: list[str], preferred_key: str = "quarters") -> int:
     """Escolhe a fase inicial da tela de palpites.
 
-    Preferência: 16-avos quando existir; senão primeira fase aberta; senão primeira da lista.
+    Preferência: Quartas quando existir; senão primeira fase aberta; senão primeira da lista.
     """
     if not stages:
         return 0
@@ -2062,6 +2062,99 @@ def build_ranking_chat_text(comparison_label: str = "") -> str:
     )
 
 
+def build_ranking_bonus_chat_text(comparison_label: str = "") -> str:
+    comparison_line = f"\n{comparison_label}\n" if comparison_label else "\n"
+    return (
+        "🏆 Kapitalo Cup\n\n"
+        "Ranking atualizado com campeão e artilheiro.\n"
+        f"{comparison_line}"
+        "Segue a classificação geral da Kapitalo Cup com os extras cadastrados."
+    )
+
+
+def strip_ranking_movement_from_username(value) -> str:
+    """Remove setas/textos de movimento do nome mostrado no ranking do Chat."""
+    text = str(value or "").strip()
+    text = re.sub(r"\s+↑\s+\d+\s*$", "", text)
+    text = re.sub(r"\s+↓\s+\d+\s*$", "", text)
+    text = re.sub(r"\s+→\s*$", "", text)
+    text = re.sub(r"\s+novo\s*$", "", text, flags=re.IGNORECASE)
+    return text.strip()
+
+
+def build_ranking_bonus_chat_view(ranking_view: pd.DataFrame, data: dict) -> pd.DataFrame:
+    """Adiciona Campeão e Artilheiro à mesma tabela do ranking enviada ao Chat.
+
+    Mantém a tabela oficial de ranking exatamente como ela já aparece no Chat
+    (posição, setas, cores e métricas) e apenas adiciona duas colunas ao final.
+    """
+    out = ranking_view.copy() if isinstance(ranking_view, pd.DataFrame) else pd.DataFrame()
+
+    if out.empty:
+        out["Campeão"] = []
+        out["Artilheiro"] = []
+        return out
+
+    out["Campeão"] = "-"
+    out["Artilheiro"] = "-"
+
+    bonus_predictions = data.get("bonus_predictions", pd.DataFrame())
+    profiles = data.get("profiles", pd.DataFrame())
+
+    if (
+        bonus_predictions is None
+        or profiles is None
+        or bonus_predictions.empty
+        or profiles.empty
+        or "Usuário" not in out.columns
+        or not {"id", "username"}.issubset(profiles.columns)
+        or "user_id" not in bonus_predictions.columns
+    ):
+        return out
+
+    bonus_cols = ["user_id"]
+    if "champion" in bonus_predictions.columns:
+        bonus_cols.append("champion")
+    if "top_scorer" in bonus_predictions.columns:
+        bonus_cols.append("top_scorer")
+
+    if len(bonus_cols) == 1:
+        return out
+
+    bonus_map = bonus_predictions[bonus_cols].copy()
+    profile_map = profiles[["id", "username"]].copy()
+
+    joined = profile_map.merge(
+        bonus_map,
+        left_on="id",
+        right_on="user_id",
+        how="left",
+    )
+
+    champion_by_username = {}
+    scorer_by_username = {}
+
+    for _, row in joined.iterrows():
+        username = str(row.get("username", "")).strip()
+        if not username:
+            continue
+
+        if "champion" in joined.columns:
+            champion = row.get("champion")
+            champion_by_username[username] = "-" if pd.isna(champion) or str(champion).strip() == "" else str(champion).strip()
+
+        if "top_scorer" in joined.columns:
+            top_scorer = row.get("top_scorer")
+            scorer_by_username[username] = "-" if pd.isna(top_scorer) or str(top_scorer).strip() == "" else str(top_scorer).strip()
+
+    clean_usernames = out["Usuário"].map(strip_ranking_movement_from_username)
+    out["Campeão"] = clean_usernames.map(lambda username: champion_by_username.get(username, "-"))
+    out["Artilheiro"] = clean_usernames.map(lambda username: scorer_by_username.get(username, "-"))
+
+    out.attrs.update(getattr(ranking_view, "attrs", {}))
+    return out
+
+
 def build_pending_predictions_summary_table() -> pd.DataFrame:
     """Tabela apenas com usuários que ainda têm jogos pendentes.
 
@@ -2495,7 +2588,7 @@ def render_chat_match_selector(matches: pd.DataFrame, key_prefix: str) -> tuple[
 
     with col_stage:
         selected_stage = st.selectbox("Fase", stages, index=get_default_stage_index(
-            stages, preferred_key="r16"), key=f"{key_prefix}_stage")
+            stages, preferred_key="quarters"), key=f"{key_prefix}_stage")
 
     filtered = schedule_matches[schedule_matches["stage"]
                                 == selected_stage].copy()
@@ -3039,29 +3132,70 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
         st.dataframe(ranking_view, use_container_width=True,
                      hide_index=True, height=420)
 
-        chat_text = build_ranking_chat_text(comparison_label)
-        with st.expander("Prévia da mensagem"):
-            st.text(chat_text)
+        ranking_bonus_view = build_ranking_bonus_chat_view(ranking_view, data)
 
-        if st.button(
-            "Enviar ranking atualizado para Google Chat",
-            key="send_ranking_chat",
-            use_container_width=True,
-            disabled=not config_ok or ranking_view.empty,
-        ):
-            try:
-                image_path = dataframe_to_png(
-                    ranking_view,
-                    title="Ranking Kapitalo Cup",
-                    subtitle=(comparison_label or now_app_tz().strftime(
-                        "Atualizado em %d/%m/%Y %H:%M")),
-                    max_rows=None,
-                    max_fig_height=36,
-                )
-                send_google_chat_image(chat_text, image_path)
-                st.success("Ranking enviado para o Google Chat.")
-            except Exception as exc:
-                st.error(f"Erro ao enviar ranking para Google Chat: {exc}")
+        with st.expander("Prévia do ranking com campeão e artilheiro"):
+            st.dataframe(
+                ranking_bonus_view,
+                use_container_width=True,
+                hide_index=True,
+                height=420,
+            )
+
+        chat_text = build_ranking_chat_text(comparison_label)
+        chat_text_bonus = build_ranking_bonus_chat_text(comparison_label)
+
+        msg_col1, msg_col2 = st.columns(2)
+        with msg_col1:
+            with st.expander("Prévia da mensagem — ranking"):
+                st.text(chat_text)
+        with msg_col2:
+            with st.expander("Prévia da mensagem — ranking com extras"):
+                st.text(chat_text_bonus)
+
+        send_col1, send_col2 = st.columns(2)
+
+        with send_col1:
+            if st.button(
+                "Enviar ranking atualizado para Google Chat",
+                key="send_ranking_chat",
+                use_container_width=True,
+                disabled=not config_ok or ranking_view.empty,
+            ):
+                try:
+                    image_path = dataframe_to_png(
+                        ranking_view,
+                        title="Ranking Kapitalo Cup",
+                        subtitle=(comparison_label or now_app_tz().strftime(
+                            "Atualizado em %d/%m/%Y %H:%M")),
+                        max_rows=None,
+                        max_fig_height=36,
+                    )
+                    send_google_chat_image(chat_text, image_path)
+                    st.success("Ranking enviado para o Google Chat.")
+                except Exception as exc:
+                    st.error(f"Erro ao enviar ranking para Google Chat: {exc}")
+
+        with send_col2:
+            if st.button(
+                "Enviar ranking com campeão e artilheiro",
+                key="send_ranking_bonus_chat",
+                use_container_width=True,
+                disabled=not config_ok or ranking_bonus_view.empty,
+            ):
+                try:
+                    image_path = dataframe_to_png(
+                        ranking_bonus_view,
+                        title="Ranking Kapitalo Cup — campeão e artilheiro",
+                        subtitle=(comparison_label or now_app_tz().strftime(
+                            "Atualizado em %d/%m/%Y %H:%M")),
+                        max_rows=None,
+                        max_fig_height=40,
+                    )
+                    send_google_chat_image(chat_text_bonus, image_path)
+                    st.success("Ranking com campeão e artilheiro enviado para o Google Chat.")
+                except Exception as exc:
+                    st.error(f"Erro ao enviar ranking com campeão e artilheiro: {exc}")
 
     with tab_bonus_dist_chat:
         st.markdown("#### Enviar distribuição de campeões e artilheiros")
@@ -3146,7 +3280,7 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
                 "Fase do mata-mata",
                 knockout_stages,
                 index=get_default_stage_index(
-                    knockout_stages, preferred_key="r16"),
+                    knockout_stages, preferred_key="quarters"),
                 key="chat_pending_knockout_stage",
             )
             only_open_matches = st.checkbox(
@@ -4728,7 +4862,7 @@ def render_excel_template_import_page(user_id: str, username: str, supabase, mat
     selected_template_stage = st.selectbox(
         "Template para qual fase aberta?",
         stage_options,
-        index=get_default_stage_index(stage_options, preferred_key="r16"),
+        index=get_default_stage_index(stage_options, preferred_key="quarters"),
         key="template_stage_selector",
     )
 
@@ -5518,7 +5652,7 @@ def render_card_group_predictions(
         selected_stage = st.selectbox(
             "Fase",
             stages,
-            index=get_default_stage_index(stages, preferred_key="r16"),
+            index=get_default_stage_index(stages, preferred_key="quarters"),
             key="pred_stage",
         )
 
@@ -5834,7 +5968,7 @@ def render_match_predictions_page():
         selected_stage = st.selectbox(
             "Fase",
             stages,
-            index=get_default_stage_index(stages, preferred_key="r16"),
+            index=get_default_stage_index(stages, preferred_key="quarters"),
             key="prediction_stage_main",
         )
         render_stage_lock_message(
