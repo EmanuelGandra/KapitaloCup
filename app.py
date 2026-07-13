@@ -904,7 +904,7 @@ def match_lock_source_text(match_or_row) -> str:
     return "Prazo específico do jogo" if has_match_lock_override(match_or_row) else "Prazo padrão da fase"
 
 
-def get_default_stage_index(stages: list[str], preferred_key: str = "quarters") -> int:
+def get_default_stage_index(stages: list[str], preferred_key: str = "semis") -> int:
     """Escolhe a fase inicial da tela de palpites.
 
     Preferência: Quartas quando existir; senão primeira fase aberta; senão primeira da lista.
@@ -2088,7 +2088,8 @@ def build_ranking_bonus_chat_view(ranking_view: pd.DataFrame, data: dict) -> pd.
     Mantém a tabela oficial de ranking exatamente como ela já aparece no Chat
     (posição, setas, cores e métricas) e apenas adiciona duas colunas ao final.
     """
-    out = ranking_view.copy() if isinstance(ranking_view, pd.DataFrame) else pd.DataFrame()
+    out = ranking_view.copy() if isinstance(
+        ranking_view, pd.DataFrame) else pd.DataFrame()
 
     if out.empty:
         out["Campeão"] = []
@@ -2141,15 +2142,19 @@ def build_ranking_bonus_chat_view(ranking_view: pd.DataFrame, data: dict) -> pd.
 
         if "champion" in joined.columns:
             champion = row.get("champion")
-            champion_by_username[username] = "-" if pd.isna(champion) or str(champion).strip() == "" else str(champion).strip()
+            champion_by_username[username] = "-" if pd.isna(champion) or str(
+                champion).strip() == "" else str(champion).strip()
 
         if "top_scorer" in joined.columns:
             top_scorer = row.get("top_scorer")
-            scorer_by_username[username] = "-" if pd.isna(top_scorer) or str(top_scorer).strip() == "" else str(top_scorer).strip()
+            scorer_by_username[username] = "-" if pd.isna(top_scorer) or str(
+                top_scorer).strip() == "" else str(top_scorer).strip()
 
     clean_usernames = out["Usuário"].map(strip_ranking_movement_from_username)
-    out["Campeão"] = clean_usernames.map(lambda username: champion_by_username.get(username, "-"))
-    out["Artilheiro"] = clean_usernames.map(lambda username: scorer_by_username.get(username, "-"))
+    out["Campeão"] = clean_usernames.map(
+        lambda username: champion_by_username.get(username, "-"))
+    out["Artilheiro"] = clean_usernames.map(
+        lambda username: scorer_by_username.get(username, "-"))
 
     out.attrs.update(getattr(ranking_view, "attrs", {}))
     return out
@@ -2588,7 +2593,7 @@ def render_chat_match_selector(matches: pd.DataFrame, key_prefix: str) -> tuple[
 
     with col_stage:
         selected_stage = st.selectbox("Fase", stages, index=get_default_stage_index(
-            stages, preferred_key="quarters"), key=f"{key_prefix}_stage")
+            stages, preferred_key="semis"), key=f"{key_prefix}_stage")
 
     filtered = schedule_matches[schedule_matches["stage"]
                                 == selected_stage].copy()
@@ -3193,9 +3198,11 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
                         max_fig_height=40,
                     )
                     send_google_chat_image(chat_text_bonus, image_path)
-                    st.success("Ranking com campeão e artilheiro enviado para o Google Chat.")
+                    st.success(
+                        "Ranking com campeão e artilheiro enviado para o Google Chat.")
                 except Exception as exc:
-                    st.error(f"Erro ao enviar ranking com campeão e artilheiro: {exc}")
+                    st.error(
+                        f"Erro ao enviar ranking com campeão e artilheiro: {exc}")
 
     with tab_bonus_dist_chat:
         st.markdown("#### Enviar distribuição de campeões e artilheiros")
@@ -3280,7 +3287,7 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
                 "Fase do mata-mata",
                 knockout_stages,
                 index=get_default_stage_index(
-                    knockout_stages, preferred_key="quarters"),
+                    knockout_stages, preferred_key="semis"),
                 key="chat_pending_knockout_stage",
             )
             only_open_matches = st.checkbox(
@@ -4862,7 +4869,7 @@ def render_excel_template_import_page(user_id: str, username: str, supabase, mat
     selected_template_stage = st.selectbox(
         "Template para qual fase aberta?",
         stage_options,
-        index=get_default_stage_index(stage_options, preferred_key="quarters"),
+        index=get_default_stage_index(stage_options, preferred_key="semis"),
         key="template_stage_selector",
     )
 
@@ -5652,7 +5659,7 @@ def render_card_group_predictions(
         selected_stage = st.selectbox(
             "Fase",
             stages,
-            index=get_default_stage_index(stages, preferred_key="quarters"),
+            index=get_default_stage_index(stages, preferred_key="semis"),
             key="pred_stage",
         )
 
@@ -5968,7 +5975,7 @@ def render_match_predictions_page():
         selected_stage = st.selectbox(
             "Fase",
             stages,
-            index=get_default_stage_index(stages, preferred_key="quarters"),
+            index=get_default_stage_index(stages, preferred_key="semis"),
             key="prediction_stage_main",
         )
         render_stage_lock_message(
