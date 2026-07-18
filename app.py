@@ -904,7 +904,7 @@ def match_lock_source_text(match_or_row) -> str:
     return "Prazo específico do jogo" if has_match_lock_override(match_or_row) else "Prazo padrão da fase"
 
 
-def get_default_stage_index(stages: list[str], preferred_key: str = "semis") -> int:
+def get_default_stage_index(stages: list[str], preferred_key: str = "third_place") -> int:
     """Escolhe a fase inicial da tela de palpites.
 
     Preferência: Quartas quando existir; senão primeira fase aberta; senão primeira da lista.
@@ -2593,7 +2593,7 @@ def render_chat_match_selector(matches: pd.DataFrame, key_prefix: str) -> tuple[
 
     with col_stage:
         selected_stage = st.selectbox("Fase", stages, index=get_default_stage_index(
-            stages, preferred_key="semis"), key=f"{key_prefix}_stage")
+            stages, preferred_key="third_place"), key=f"{key_prefix}_stage")
 
     filtered = schedule_matches[schedule_matches["stage"]
                                 == selected_stage].copy()
@@ -3287,7 +3287,7 @@ def render_google_chat_admin_page(matches: pd.DataFrame):
                 "Fase do mata-mata",
                 knockout_stages,
                 index=get_default_stage_index(
-                    knockout_stages, preferred_key="semis"),
+                    knockout_stages, preferred_key="third_place"),
                 key="chat_pending_knockout_stage",
             )
             only_open_matches = st.checkbox(
@@ -4869,7 +4869,8 @@ def render_excel_template_import_page(user_id: str, username: str, supabase, mat
     selected_template_stage = st.selectbox(
         "Template para qual fase aberta?",
         stage_options,
-        index=get_default_stage_index(stage_options, preferred_key="semis"),
+        index=get_default_stage_index(
+            stage_options, preferred_key="third_place"),
         key="template_stage_selector",
     )
 
@@ -5659,7 +5660,7 @@ def render_card_group_predictions(
         selected_stage = st.selectbox(
             "Fase",
             stages,
-            index=get_default_stage_index(stages, preferred_key="semis"),
+            index=get_default_stage_index(stages, preferred_key="third_place"),
             key="pred_stage",
         )
 
@@ -5975,7 +5976,7 @@ def render_match_predictions_page():
         selected_stage = st.selectbox(
             "Fase",
             stages,
-            index=get_default_stage_index(stages, preferred_key="semis"),
+            index=get_default_stage_index(stages, preferred_key="third_place"),
             key="prediction_stage_main",
         )
         render_stage_lock_message(
